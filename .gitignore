@@ -1,0 +1,22 @@
+node_modules/
+.DS_Store
+
+# Build outputs
+/dist/
+*.apk
+*.aab
+
+# Secrets: never commit signing keys or credentials
+*.jks
+*.keystore
+fastlane/.env
+fastlane/.env.*
+!fastlane/.env.example
+
+# Fastlane outputs
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/README.md
+fastlane/test_output/
+vendor/bundle/
+.bundle/

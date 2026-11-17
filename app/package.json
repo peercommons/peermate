@@ -1,0 +1,33 @@
+{
+  "name": "peermate",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "dependencies": {
+    "b4a": "^1.9.0",
+    "bare-stow-runtime": "^0.1.2",
+    "expo": "~58.0.26",
+    "expo-bare-kit": "^0.3.0",
+    "expo-build-properties": "~58.0.12",
+    "expo-status-bar": "~58.0.5",
+    "expo-system-ui": "~58.0.7",
+    "hypercore-crypto": "^3.7.0",
+    "hyperswarm": "^4.17.2",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-bare-kit": "^0.17.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "hyperdht": "^6.36.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "typecheck": "tsc --noEmit",
+    "test:p2p": "node --test --test-timeout=60000 tools/worker.test.mjs",
+    "spike-peer": "node tools/spike-peer.mjs"
+  },
+  "private": true
+}

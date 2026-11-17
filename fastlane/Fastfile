@@ -1,0 +1,81 @@
+# Peermate release automation. See SPECS.md §13.
+#
+#   bundle exec fastlane android sideload              # signed APK in dist/
+#   bundle exec fastlane android sideload publish:true # ...and attach it to a GitHub Release
+#
+# Secrets come from environment variables, or from fastlane/.env (gitignored;
+# copy fastlane/.env.example). Create the signing key once with
+# scripts/create-release-keystore.sh.
+
+require 'json'
+
+APP_DIR = File.expand_path('../app', __dir__)
+DIST_DIR = File.expand_path('../dist', __dir__)
+
+def require_env!(*names)
+  missing = names.reject { |n| ENV[n] && !ENV[n].empty? }
+  UI.user_error!("Missing environment variables: #{missing.join(', ')}") unless missing.empty?
+end
+
+def marketing_version
+  JSON.parse(File.read(File.join(APP_DIR, 'app.json')))['expo']['version']
+end
+
+# Android only installs an update if its versionCode is higher than the
+# installed one. The commit count on the release branch only ever grows.
+def next_version_code
+  Integer(sh('git rev-list --count HEAD', log: false).strip)
+end
+
+default_platform(:android)
+
+platform :android do
+  desc 'Build a signed universal release APK for sideloading (optionally publish to a GitHub Release)'
+  lane :sideload do |options|
+    require_env!('PEERMATE_KEYSTORE_PATH', 'PEERMATE_KEYSTORE_PASSWORD',
+                 'PEERMATE_KEY_ALIAS', 'PEERMATE_KEY_PASSWORD')
+
+    version = marketing_version
+    code = options[:version_code] ? Integer(options[:version_code]) : next_version_code
+    ENV['PEERMATE_VERSION_CODE'] = code.to_s # read by app/app.config.js
+
+    # Regenerate the native project from app.json (Continuous Native Generation).
+    sh("cd #{APP_DIR} && CI=1 npx expo prebuild -p android --clean --no-install")
+
+    # The injected signing properties override the debug signing config in the
+    # generated build.gradle, so the APK is signed with the release key.
+    gradle(
+      project_dir: File.join(APP_DIR, 'android'),
+      task: 'assemble',
+      build_type: 'Release',
+      print_command: false, # keep passwords out of the log
+      properties: {
+        'android.injected.signing.store.file' => File.expand_path(ENV['PEERMATE_KEYSTORE_PATH']),
+        'android.injected.signing.store.password' => ENV['PEERMATE_KEYSTORE_PASSWORD'],
+        'android.injected.signing.key.alias' => ENV['PEERMATE_KEY_ALIAS'],
+        'android.injected.signing.key.password' => ENV['PEERMATE_KEY_PASSWORD']
+      }
+    )
+
+    FileUtils.mkdir_p(DIST_DIR)
+    apk = File.join(DIST_DIR, "peermate-#{version}-#{code}.apk")
+    FileUtils.cp(lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH], apk)
+    UI.success("APK ready: #{apk}")
+
+    if options[:publish]
+      require_env!('GITHUB_TOKEN', 'PEERMATE_GITHUB_REPO')
+      set_github_release(
+        repository_name: ENV['PEERMATE_GITHUB_REPO'], # e.g. "you/peermate"
+        api_token: ENV['GITHUB_TOKEN'],
+        tag_name: "v#{version}-#{code}",
+        name: "Peermate #{version} (#{code})",
+        commitish: sh('git rev-parse HEAD', log: false).strip,
+        description: "Sideload build #{code}. On Android, allow \"Install unknown apps\" for your browser or file manager, then open the APK.",
+        is_prerelease: true,
+        upload_assets: [apk]
+      )
+    end
+
+    apk
+  end
+end
