@@ -13,15 +13,18 @@ Status: **Phase 0** (Android-first technical spikes).
 | `app/tools/` | Runs the same worker under Node: a desktop test peer and an automated local-testnet test. |
 | `core/` | Pure TypeScript game/protocol logic (no React Native). |
 | `fastlane/` | Release automation (`android sideload` for now). |
+| `native/` | Arasan chess engine (submodule), its Android build script, and a device benchmark (`native/tools/arasan-bench.mjs`). |
 | `scripts/` | One-off setup scripts. |
 
 ## Requirements
 
-Node 22, JDK 17, Android SDK (API 29+ device or emulator), Ruby + Bundler for Fastlane.
+Node 22, JDK 17, Android SDK + NDK (API 29+ arm64 device or emulator), Ruby + Bundler for Fastlane.
 
 ## Develop
 
 ```sh
+git submodule update --init native/arasan
+native/build-arasan-android.sh  # builds the chess engine into app/modules/arasan-engine
 cd app && npm install
 npm run android          # build and install a dev build on a connected phone/emulator
 npm run test:p2p         # two P2P workers on a local testnet (no internet)

@@ -216,21 +216,34 @@ Public MQTT brokers *can* work technically (topic = `peermate/v1/lobby/blitz`, p
 ## 5. CPU Opponent
 
 ### 5.1 Engine
-- **Arasan** (C++, by Jon Dart; MIT-style licence; actively maintained). Pin to a tagged release and vendor it as a Git submodule.
-- Compiled for arm64 (iOS) and arm64-v8a / armeabi-v7a / x86_64 (Android) using Arasan's ARM NEON build configuration. Exposed via a **C++ TurboModule** speaking UCI on a dedicated thread.
-- The NNUE network is a separate file loaded at runtime (UCI option `NNUE File`). Ship it as an app asset and pass its on-device path at engine start. Measure its size and the app-size impact in Phase 0.
-- **Opening book:** enable Arasan's own book (`OwnBook=true`, `BookPath` → bundled `book.bin`). Use `Book variety` (0–100) so CPU games don't repeat the same openings: higher at low levels, lower at high levels.
+- **Arasan** (C++, by Jon Dart; MIT-style licence; actively maintained), pinned as a Git submodule at `native/arasan` (v26.1). Fathom (MIT), its tablebase-probing code, is built in because v26.1 doesn't compile without it; no tablebase files ship.
+- **Android:** `native/build-arasan-android.sh` cross-compiles a statically linked arm64 executable (NEON, 16 KB page-aligned, ~2 MB; 0.56 MB compressed in the APK) and installs it into the local Expo module `app/modules/arasan-engine` as `libarasan.so`. Android extracts it to `nativeLibraryDir`, the only place an app may execute files from on Android 10+. The module runs it as a **child process** and speaks UCI over stdin/stdout, so an engine crash can't take down the app.
+- **iOS** can't spawn processes: there the engine must be built as a library and run on a thread with in-memory pipes. Do this at the Phase 2 iOS checkpoint.
+- **Network:** `arasanv8-20261005.nnue`, 24 MB raw, **13.6 MB compressed in the APK**. Shipped as an asset and copied once to `filesDir` (the engine needs a file path), then set via `setoption name NNUE file value <path>`.
+- **Opening book: not shipped in v1.** `book.bin` is 27 MB (13 MB compressed), which would blow the download budget. Opening variety comes from the level randomness and, for strong levels, a small curated opening list (≤ 200 KB) chosen in Phase 1.
 - Android: native libs must be built with **16 KB page alignment** (Google Play requirement for apps targeting Android 15+).
-- **Fallback engine:** Caissa (MIT, stronger, no built-in strength limiting) if Arasan fails the Phase 0 size or performance checks. Use Caissa 0.7 or later only, since 0.6 used Stockfish's network.
+- **Fallback engine:** Caissa (MIT, stronger, no built-in strength limiting) if Arasan fails later checks. Use Caissa 0.7 or later only, since 0.6 used Stockfish's network.
+
+**Phase 0 measurements** (Android emulator, arm64 on Apple silicon; re-measure on real mid-range phones):
+
+| Metric | Result |
+|---|---|
+| Full strength, 1 thread, 16 MB hash, 1 s/move | ~104k nodes/s, depth 15–19 |
+| Peak memory | 67 MB |
+| Depth 1–6 search | 5–15 ms |
+| `UCI_Elo` limited search, `movetime 1000` | ~840 ms; moves visibly weaker (e.g. `g2g4` at 1200) |
+| Moves differing from full strength (18 tries) | 1000: 13 · 1200/1400/1650: 9 each · 1950: 1 · 2300: 2 |
+
+The identical results for 1200–1650 suggest Arasan's limiter may not separate those settings well. The level table below must be **re-derived from game-based calibration** (§12.3), not taken from `UCI_Elo` labels.
 
 ### 5.2 Difficulty levels
 Elo figures are *targets*. Calibrate them in CI by running `cutechess-cli` matches against anchored engines (§12.3).
 
 | Level | Label | Target Elo | Arasan config | Extra behavior |
 |---|---|---|---|---|
-| 1 | Newcomer | ~400 | `Strength` 0, depth cap 1, `MultiPV 8` | 40% chance to play a random move from the weaker half of the candidates; never sees 1-move mates |
-| 2 | Beginner | ~600 | `Strength` 0, depth cap 2, `MultiPV 8` | 25% random choice from the top 8 |
-| 3 | Novice | ~800 | `Strength` 5, depth cap 3, `MultiPV 5` | 15% random choice from the top 5 |
+| 1 | Newcomer | ~400 | depth cap 1, `MultiPV 8` | 40% chance to play a random move from the weaker half of the candidates; never sees 1-move mates |
+| 2 | Beginner | ~600 | depth cap 2, `MultiPV 8` | 25% random choice from the top 8 |
+| 3 | Novice | ~800 | depth cap 3, `MultiPV 5` | 15% random choice from the top 5 |
 | 4 | Casual | ~1000 | `UCI_LimitStrength=true`, `UCI_Elo=1000`, `MultiPV 4` | 5% random choice from the top 4 |
 | 5 | Club | ~1200 | `UCI_Elo=1200` | n/a |
 | 6 | Intermediate | ~1400 | `UCI_Elo=1400` | n/a |
@@ -240,9 +253,10 @@ Elo figures are *targets*. Calibrate them in CI by running `cutechess-cli` match
 | 10 | Grandmaster | 2800+ | Full strength (`UCI_LimitStrength=false`), `movetime` 1000 ms | n/a |
 
 Notes:
-- Arasan's `UCI_Elo` range is **1000–3450**, so levels 4–9 use it directly. Only levels 1–3 (below 1000) need depth caps plus controlled randomness ("blunder injection") on top of the `Strength` setting (0–100). Randomness is applied by `EngineService` choosing among the `MultiPV` candidate lines.
+- Arasan's `UCI_Elo` range is **1000–3450**, so levels 4–9 use it directly. Its README's `Strength` (0–100) option is **not exposed over UCI**, so levels 1–3 (below 1000) rely on depth caps plus controlled randomness ("blunder injection"): `EngineService` picks among the `MultiPV` candidate lines (verified: depth 1 returns 8 ranked candidates).
+- Send `ucinewgame` between games and when changing level, so hash-table results from a stronger search don't leak into a weaker one.
 - **Humanized think time:** random 300–1500 ms delay at low levels so the CPU doesn't reply instantly.
-- Engine runs with `Threads=1` and a small hash (`Hash` is set in **kilobytes** in Arasan, e.g. `16384` for 16 MB) for levels 1–9 to limit battery/thermal load.
+- Engine runs with `Threads=1` and `Hash=16` (**MB**; the UCI option is in megabytes, min 4) to limit memory, battery and thermal load.
 - Post-game analysis (§2.5) uses the same engine at full strength with a time budget.
 - Adaptive mode (v1.1): suggests the next level after 3 wins/losses in a row.
 
@@ -521,7 +535,8 @@ Measure real-world **hole-punch success rate** across Wi-Fi/4G/5G/carrier CGNAT 
 ```
 /app                 # Expo/React Native app (prebuild generates ios/ and android/)
 /app/p2p-worklet     # Bare bundle (hyperswarm), built with bare-pack
-/native/arasan       # Arasan submodule + TurboModule bindings
+/native/arasan       # Arasan submodule (v26.1); build script in /native
+/app/modules/arasan-engine  # Expo module running the engine (UCI over a child process)
 /core                # Pure TS domain logic
 /fastlane            # Fastfile, Appfile, Matchfile, Pluginfile, metadata/, screenshots/
 /.github/workflows   # ci.yml, release.yml

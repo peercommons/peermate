@@ -15,6 +15,10 @@ import { StatusBar } from 'expo-status-bar';
 import b4a from 'b4a';
 import p2p from 'expo-bare-kit/workers/p2p/worker';
 import { joinNostrRoom, type NostrRoom } from './net/nostrRoom';
+import { bestMove } from './engine/arasan';
+
+// Engine timing test position (a middlegame; deliberately unbalanced, it's only for timing).
+const TEST_FEN = 'r2q1rk1/1b2bppp/p2ppn2/1p6/3NP3/1BN1B3/PPP2PPP/R2Q1RK1 w - - 0 11';
 
 type WorkerMsg =
   | { type: 'ready'; publicKey: string }
@@ -42,6 +46,8 @@ export default function App() {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [lines, setLines] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
+  const [level, setLevel] = useState(5);
+  const [thinking, setThinking] = useState(false);
 
   const addLine = useCallback((line: string) => {
     setLines((prev) => [`${time()}  ${line}`, ...prev].slice(0, 200));
@@ -164,6 +170,22 @@ export default function App() {
     });
   };
 
+  const think = async () => {
+    setThinking(true);
+    try {
+      const r = await bestMove(TEST_FEN, level);
+      addLine(
+        `cpu L${level}: ${r.move} in ${r.thinkMs} ms` +
+          (r.depth != null ? ` (depth ${r.depth})` : '') +
+          (r.randomPick ? ' [random pick]' : ''),
+      );
+    } catch (err) {
+      addLine(`[error] engine: ${(err as Error).message}`);
+    } finally {
+      setThinking(false);
+    }
+  };
+
   const chat = (text: string) =>
     mode === 'p2p' ? send({ type: 'chat', text }) : nostrRef.current?.chat(text);
   const ping = () => (mode === 'p2p' ? send({ type: 'ping' }) : nostrRef.current?.ping());
@@ -192,6 +214,13 @@ export default function App() {
         />
         <Button label={joined ? 'Rejoin' : 'Join'} onPress={join} />
         <Button label="Ping" onPress={ping} disabled={!peers.length} />
+      </View>
+
+      <View style={styles.row}>
+        <Text style={styles.section}>CPU level {level}</Text>
+        <Button label="−" onPress={() => setLevel((l) => Math.max(1, l - 1))} />
+        <Button label="+" onPress={() => setLevel((l) => Math.min(10, l + 1))} />
+        <Button label={thinking ? 'Thinking…' : 'Think'} onPress={think} disabled={thinking} />
       </View>
 
       <Text style={styles.section}>Peers ({peers.length})</Text>

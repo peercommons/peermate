@@ -51,6 +51,10 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true # native/arasan (the build script fetches its Fathom submodule)
+      - run: native/build-arasan-android.sh
+        working-directory: .
       - uses: actions/setup-node@v5
         with:
           node-version: 22
