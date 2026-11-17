@@ -523,7 +523,8 @@ Measure real-world **hole-punch success rate** across Wi-Fi/4G/5G/carrier CGNAT 
 | Direct P2P, phone on home Wi-Fi ↔ Mac (same LAN) | Connected in 3.3 s, RTT ~119 ms |
 | Direct P2P, phone on **5G behind carrier-grade NAT** (`100.64.0.0/10`) ↔ Mac behind home router | **Hole-punched direct path** in 4.7 s; RTT 93–137 ms (one 341 ms spike); chat both ways |
 | Arasan, full strength, 1 thread, 1 s/move | 258k nodes/s, depth 16; 67 MB peak memory |
-| Nostr fallback from the phone | Not yet run on the device (verified on emulator) |
+| Nostr fallback, phone on **5G behind carrier-grade NAT** ↔ Mac | Discovery 2.8 s; RTT 685–972 ms; delivery both ways |
+| Direct P2P while the phone is **locked** | Connection timed out, reconnected once, then dropped again: Android cuts background networking. Confirms the need for the reconnect window (§6.9) and the optional foreground service during live games (§8.4) |
 
 One device and one carrier: keep collecting results from testers on other carriers and countries toward the ≥ 70% direct-connection target.
 
