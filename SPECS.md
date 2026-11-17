@@ -516,6 +516,17 @@ Nightly job: `cutechess-cli` round-robin of each level vs. anchor engines with k
 ### 12.5 Field testing (Phase 0 + beta)
 Measure real-world **hole-punch success rate** across Wi-Fi/4G/5G/carrier CGNAT pairs in ≥ 5 countries. Target ≥ 70% direct; 100% connect (with fallback).
 
+**Phase 0 field results (2026-11-17, Samsung Galaxy A56 / Exynos 1580 / Android 17):**
+
+| Test | Result |
+|---|---|
+| Direct P2P, phone on home Wi-Fi ↔ Mac (same LAN) | Connected in 3.3 s, RTT ~119 ms |
+| Direct P2P, phone on **5G behind carrier-grade NAT** (`100.64.0.0/10`) ↔ Mac behind home router | **Hole-punched direct path** in 4.7 s; RTT 93–137 ms (one 341 ms spike); chat both ways |
+| Arasan, full strength, 1 thread, 1 s/move | 258k nodes/s, depth 16; 67 MB peak memory |
+| Nostr fallback from the phone | Not yet run on the device (verified on emulator) |
+
+One device and one carrier: keep collecting results from testers on other carriers and countries toward the ≥ 70% direct-connection target.
+
 ### 12.6 Performance targets
 | Metric | Target |
 |---|---|
