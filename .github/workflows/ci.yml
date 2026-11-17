@@ -38,6 +38,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix ../core # @peermate/core is linked from ../core
       - run: npm ci
       - run: npm run typecheck
       # Two P2P workers on a local HyperDHT testnet (no internet DHT needed).
@@ -65,6 +66,7 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: gradle
+      - run: npm ci --prefix ../core
       - run: npm ci
       - run: CI=1 npx expo prebuild -p android --no-install
       - run: ./gradlew assembleDebug --console=plain

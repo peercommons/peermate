@@ -1,21 +1,20 @@
-// Phase 0 spikes (a) + (c): talk to peers directly (Hyperswarm in a Bare worklet)
-// or through public Nostr relays (the fallback path).
+// Dev tools: the Phase 0 networking/engine spikes. Talk to peers directly (Hyperswarm
+// in a Bare worklet) or through public Nostr relays, and time the CPU engine.
 // This screen is throwaway test UI, not the real app.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import b4a from 'b4a';
 import p2p from 'expo-bare-kit/workers/p2p/worker';
-import { joinNostrRoom, type NostrRoom } from './net/nostrRoom';
-import { bestMove } from './engine/arasan';
+import { joinNostrRoom, type NostrRoom } from '../../net/nostrRoom';
+import { bestMove } from '../engine/arasan';
 
 // Engine timing test position (a middlegame; deliberately unbalanced, it's only for timing).
 const TEST_FEN = 'r2q1rk1/1b2bppp/p2ppn2/1p6/3NP3/1BN1B3/PPP2PPP/R2Q1RK1 w - - 0 11';
@@ -35,7 +34,7 @@ type Mode = 'p2p' | 'nostr';
 const short = (id: string) => id.slice(0, 8);
 const time = () => new Date().toLocaleTimeString();
 
-export default function App() {
+export default function DevScreen() {
   const sendRef = useRef<((msg: object) => void) | null>(null);
   const nostrRef = useRef<NostrRoom | null>(null);
   const [mode, setMode] = useState<Mode>('p2p');
@@ -191,9 +190,8 @@ export default function App() {
   const ping = () => (mode === 'p2p' ? send({ type: 'ping' }) : nostrRef.current?.ping());
 
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar style="auto" />
-      <Text style={styles.title}>Peermate · P2P spike</Text>
+    <SafeAreaView style={styles.root} edges={["bottom", "left", "right"]}>
+      <Text style={styles.title}>Dev tools</Text>
       <Text style={styles.meta}>{status}</Text>
       <Text style={styles.meta} selectable>
         me: {myKey ? short(myKey) : '…'}
@@ -284,7 +282,7 @@ function Button({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, padding: 16, paddingTop: 48, gap: 6 },
+  root: { flex: 1, padding: 16, gap: 6 },
   title: { fontSize: 20, fontWeight: '700' },
   meta: { color: '#666' },
   row: { flexDirection: 'row', gap: 8, alignItems: 'center' },

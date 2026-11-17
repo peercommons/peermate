@@ -3,13 +3,13 @@
 Peer-to-peer chess for Android and iOS: play the CPU offline, or find opponents
 worldwide with no servers involved. Full design: [SPECS.md](SPECS.md).
 
-Status: **Phase 0** (Android-first technical spikes).
+Status: **Phase 1** (offline game: vs CPU and pass & play). Phase 0 spikes are under **Dev tools** in the app.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `app/` | Expo / React Native app. `app/p2p/worker.js` is the Hyperswarm worker that runs in a Bare worklet. |
+| `app/` | Expo / React Native app. Screens in `app/src/app/` (Expo Router), board in `app/src/components/`, game state in `app/src/game/`. `app/p2p/worker.js` is the Hyperswarm worker that runs in a Bare worklet. |
 | `app/tools/` | Runs the same worker under Node: a desktop test peer and an automated local-testnet test. |
 | `core/` | Pure TypeScript game/protocol logic (no React Native). |
 | `fastlane/` | Release automation (`android sideload` for now). |
@@ -28,7 +28,7 @@ native/build-arasan-android.sh  # builds the chess engine into app/modules/arasa
 cd app && npm install
 npm run android          # build and install a dev build on a connected phone/emulator
 npm run test:p2p         # two P2P workers on a local testnet (no internet)
-cd ../core && npm install && npm test
+cd ../core && npm install && npm test   # install core before building the app: it's linked as @peermate/core
 ```
 
 ### P2P spike: test with one phone
