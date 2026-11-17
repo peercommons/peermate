@@ -20,14 +20,25 @@ import {
   type Square,
 } from '@peermate/core';
 import { bestMove, initEngine, newEngineGame } from '../engine/arasan';
+import { newGameId, saveGame } from '../storage/games';
 
 export type GameMode = { kind: 'cpu'; level: number; player: Color } | { kind: 'local' };
 
+/** Resume a saved, unfinished game. */
+export type ResumeFrom = { id: string; pgn: string; startedAt: number };
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function useGame(mode: GameMode) {
-  const chessRef = useRef(new Chess());
+export function useGame(mode: GameMode, resume?: ResumeFrom) {
+  const chessRef = useRef<Chess | null>(null);
+  if (!chessRef.current) {
+    const c = new Chess();
+    if (resume) c.loadPgn(resume.pgn);
+    chessRef.current = c;
+  }
   const chess = chessRef.current;
+  const [gameId, setGameId] = useState(() => resume?.id ?? newGameId());
+  const startedAt = useRef(resume?.startedAt ?? Date.now());
   // chess.js mutates in place; bump this to re-render after any change.
   const [version, setVersion] = useState(0);
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
@@ -144,6 +155,8 @@ export function useGame(mode: GameMode) {
     searchId.current++;
     setThinking(false);
     chess.reset();
+    setGameId(newGameId());
+    startedAt.current = Date.now();
     setResigned(null);
     setSelected(null);
     setPendingPromotion(null);
@@ -160,10 +173,35 @@ export function useGame(mode: GameMode) {
 
   const pgn = useCallback(() => toPgn(chess, { white: names.w, black: names.b }, result), [chess, names, result]);
 
+  // Save after every change (moves, undo, resignation). Empty games aren't saved.
+  const plies = chess.history().length;
+  const resultKey = result ? `${result.winner}:${result.reason}` : null;
+  useEffect(() => {
+    if (plies === 0) return;
+    saveGame({
+      id: gameId,
+      mode: isCpu ? 'cpu' : 'local',
+      level,
+      player,
+      white: names.w,
+      black: names.b,
+      pgn: toPgn(chess, { white: names.w, black: names.b, date: new Date(startedAt.current) }, result),
+      plies,
+      winner: result ? (result.winner ?? 'draw') : null,
+      reason: result?.reason ?? null,
+      startedAt: startedAt.current,
+      updatedAt: Date.now(),
+      analysis: null,
+    }).catch((err) => console.warn('saving game failed', err));
+    // `resultKey` (not `result`, a new object each render) so this runs only on real changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, resultKey, plies, gameId, isCpu, level, player, names, chess]);
+
   const history = chess.history({ verbose: true });
   const last = history.at(-1);
 
   return {
+    gameId,
     version,
     position: chess.board().map((row) => row.map((p) => (p ? { type: p.type, color: p.color } : null))),
     fen: chess.fen(),

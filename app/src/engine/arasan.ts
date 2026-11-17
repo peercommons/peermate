@@ -1,6 +1,6 @@
 // CPU opponent: drives the Arasan engine (native module) over UCI. Level policy
 // (depth caps, UCI_Elo, random picks) lives in @peermate/core so it's testable.
-import { getLevel, pickMove } from '@peermate/core';
+import { getLevel, parseInfoScore, pickMove, type Color, type Score } from '@peermate/core';
 import ArasanEngine from '../../modules/arasan-engine';
 
 export type EngineMove = { move: string; thinkMs: number; depth: number | null; randomPick: boolean };
@@ -102,4 +102,36 @@ async function think(fen: string, level: number): Promise<EngineMove> {
   const ranked = [...candidates.entries()].sort((a, b) => a[0] - b[0]).map(([, m]) => m);
   const { move, randomPick } = pickMove(config, best.split(' ')[1], ranked);
   return { move, thinkMs: Date.now() - t0, depth, randomPick };
+}
+
+export type PositionAnalysis = { score: Score; bestMove: string | null };
+
+/**
+ * Full-strength evaluation of `fen` for post-game review. The score is from
+ * White's point of view. Calls are serialized with play.
+ */
+export function analyse(fen: string, movetimeMs: number): Promise<PositionAnalysis> {
+  return enqueue(async () => {
+    await initEngine();
+    ArasanEngine.send('setoption name UCI_LimitStrength value false');
+    ArasanEngine.send('setoption name MultiPV value 1');
+    await command('isready', 'readyok');
+    ArasanEngine.send(`position fen ${fen}`);
+
+    const sideToMove = fen.split(' ')[1] as Color;
+    let score: Score | null = null;
+    const collector = (line: string) => {
+      if (!line.startsWith('info') || line.includes('lowerbound') || line.includes('upperbound')) return;
+      score = parseInfoScore(line, sideToMove) ?? score;
+    };
+    listeners.add(collector);
+    const best = await command(`go movetime ${movetimeMs}`, 'bestmove', 30000).finally(() =>
+      listeners.delete(collector),
+    );
+    const bestMove = best.split(' ')[1];
+    return {
+      score: score ?? { kind: 'cp', value: 0 },
+      bestMove: bestMove && bestMove !== '(none)' && bestMove !== '0000' ? bestMove : null,
+    };
+  });
 }

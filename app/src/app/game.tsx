@@ -1,39 +1,81 @@
 // Game screen: board, status, moves and controls for an offline game.
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 import { describeOutcome, getLevel, type Color } from '@peermate/core';
 import { Board } from '../components/Board';
 import { PromotionPicker } from '../components/PromotionPicker';
-import { useGame, type GameMode } from '../game/useGame';
-import { ui } from '../theme';
+import { useGame, type GameMode, type ResumeFrom } from '../game/useGame';
+import { formatMoves } from '../game/format';
+import { getGame } from '../storage/games';
+import { useSettings } from '../settings';
+import { BOARD_THEMES, ui } from '../theme';
 
 export default function GameScreen() {
-  const params = useLocalSearchParams<{ mode?: string; level?: string; player?: string }>();
-  const mode = useMemo<GameMode>(
-    () =>
+  const params = useLocalSearchParams<{ mode?: string; level?: string; player?: string; resume?: string }>();
+  const [loaded, setLoaded] = useState<{ mode: GameMode; resume?: ResumeFrom } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (params.resume) {
+      getGame(params.resume)
+        .then((g) => {
+          if (!g) throw new Error('Saved game not found');
+          const mode: GameMode =
+            g.mode === 'cpu' ? { kind: 'cpu', level: g.level ?? 3, player: g.player ?? 'w' } : { kind: 'local' };
+          setLoaded({ mode, resume: { id: g.id, pgn: g.pgn, startedAt: g.startedAt } });
+        })
+        .catch((err) => setError(String(err?.message ?? err)));
+      return;
+    }
+    const mode: GameMode =
       params.mode === 'cpu'
         ? {
             kind: 'cpu',
             level: Math.min(10, Math.max(1, Number(params.level) || 3)),
             player: params.player === 'b' ? 'b' : 'w',
           }
-        : { kind: 'local' },
-    [params.mode, params.level, params.player],
-  );
+        : { kind: 'local' };
+    setLoaded({ mode });
+  }, [params.resume, params.mode, params.level, params.player]);
 
-  const game = useGame(mode);
+  if (error) return <Text style={[styles.status, styles.alert]}>{error}</Text>;
+  if (!loaded) return <ActivityIndicator style={{ marginTop: 40 }} color={ui.accent} />;
+  return <GameView mode={loaded.mode} resume={loaded.resume} />;
+}
+
+function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
+  const game = useGame(mode, resume);
+  const { settings } = useSettings();
   const { width } = useWindowDimensions();
   const boardSize = Math.min(width - 16, 560);
   const [flipped, setFlipped] = useState(false);
 
-  // vs CPU: your colour at the bottom. Pass & play: the side to move at the bottom.
-  const base: Color = mode.kind === 'cpu' ? mode.player : game.turn;
+  // vs CPU: your colour at the bottom. Pass & play: the side to move (if auto-flip is on).
+  const base: Color = mode.kind === 'cpu' ? mode.player : settings.autoFlip ? game.turn : 'w';
   const orientation: Color = flipped ? (base === 'w' ? 'b' : 'w') : base;
   const top = orientation === 'w' ? 'b' : 'w';
 
-  const title = mode.kind === 'cpu' ? `vs CPU · Level ${mode.level} (${getLevel(mode.level).label})` : 'Pass & play';
+  // A tap on every move; a firmer one for captures, checks and mates.
+  const lastSan = game.sanMoves.at(-1);
+  const moveCount = game.sanMoves.length;
+  const prevCount = useRef(moveCount);
+  useEffect(() => {
+    if (settings.haptics && moveCount > prevCount.current && lastSan) {
+      const strong = /[x+#]/.test(lastSan);
+      Haptics.impactAsync(strong ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light).catch(
+        () => undefined,
+      );
+    }
+    prevCount.current = moveCount;
+  }, [moveCount, lastSan, settings.haptics]);
+
+  const title = useMemo(
+    () => (mode.kind === 'cpu' ? `vs CPU · Level ${mode.level} (${getLevel(mode.level).label})` : 'Pass & play'),
+    [mode],
+  );
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
@@ -47,11 +89,13 @@ export default function GameScreen() {
           size={boardSize}
           orientation={orientation}
           selected={game.selected}
-          targets={game.targets}
+          targets={settings.showLegalMoves ? game.targets : []}
           lastMove={game.lastMove}
           checkSquare={game.checkSquare}
           onSquarePress={game.onSquarePress}
           disabled={!game.humanToMove}
+          colors={BOARD_THEMES[settings.boardTheme]}
+          showCoordinates={settings.showCoordinates}
         />
       </View>
 
@@ -71,13 +115,18 @@ export default function GameScreen() {
 
       <View style={styles.controls}>
         {game.result ? (
-          <Control label="New game" onPress={game.newGame} />
+          <>
+            <Control label="New game" onPress={game.newGame} />
+            <Control label="Review" onPress={() => router.push({ pathname: '/review', params: { id: game.gameId } })} />
+          </>
         ) : (
-          <Control label="Resign" onPress={game.resign} disabled={game.sanMoves.length === 0} />
+          <>
+            <Control label="Resign" onPress={game.resign} disabled={game.sanMoves.length === 0} />
+            <Control label="Undo" onPress={game.undo} disabled={!game.canUndo} />
+          </>
         )}
-        <Control label="Undo" onPress={game.undo} disabled={!game.canUndo} />
         <Control label="Flip" onPress={() => setFlipped((f) => !f)} />
-        <Control label="Share PGN" onPress={() => Share.share({ message: game.pgn() })} disabled={game.sanMoves.length === 0} />
+        <Control label="Share" onPress={() => Share.share({ message: game.pgn() })} disabled={game.sanMoves.length === 0} />
       </View>
 
       <PromotionPicker color={game.promotionColor} onChoose={game.choosePromotion} />
@@ -127,15 +176,6 @@ function Control({ label, onPress, disabled }: { label: string; onPress: () => v
       <Text style={styles.controlText}>{label}</Text>
     </Pressable>
   );
-}
-
-/** "1. e4 e5 2. Nf3 Nc6 ..." */
-function formatMoves(san: string[]): string {
-  const parts: string[] = [];
-  for (let i = 0; i < san.length; i += 2) {
-    parts.push(`${i / 2 + 1}. ${san[i]}${san[i + 1] ? ` ${san[i + 1]}` : ''}`);
-  }
-  return parts.join('  ');
 }
 
 const styles = StyleSheet.create({

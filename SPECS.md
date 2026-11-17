@@ -236,6 +236,9 @@ Public MQTT brokers *can* work technically (topic = `peermate/v1/lobby/blitz`, p
 
 The identical results for 1200–1650 suggest Arasan's limiter may not separate those settings well. The level table below must be **re-derived from game-based calibration** (§12.3), not taken from `UCI_Elo` labels.
 
+### 5.1a Analysis score scale
+Arasan's centipawns run about 2× larger than "normalized" engines (start position +0.67 vs ~+0.25). Post-game judgments use a logistic win-chance curve that assumes normalized centipawns, so Arasan scores are multiplied by `ARASAN_CP_SCALE` (provisional **0.45**, in `core/src/analysis.ts`) before judging and display. Raw scores are stored, so refitting the constant (§12.3) needs no re-analysis.
+
 ### 5.2 Difficulty levels
 Elo figures are *targets*. Calibrate them in CI by running `cutechess-cli` matches against anchored engines (§12.3).
 

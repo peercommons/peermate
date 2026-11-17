@@ -1,8 +1,10 @@
 // Home: start a game vs the CPU or pass & play (SPECS §2.1).
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Link, router } from 'expo-router';
+import { Link, router, useFocusEffect } from 'expo-router';
 import { LEVELS } from '@peermate/core';
+import { latestUnfinished, type GameRecord } from '../storage/games';
+import { formatDate } from '../game/format';
 import { ui } from '../theme';
 
 type ColorChoice = 'w' | 'b' | 'random';
@@ -10,6 +12,13 @@ type ColorChoice = 'w' | 'b' | 'random';
 export default function Home() {
   const [level, setLevel] = useState(3);
   const [color, setColor] = useState<ColorChoice>('w');
+  const [unfinished, setUnfinished] = useState<GameRecord | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      latestUnfinished().then(setUnfinished).catch(() => setUnfinished(null));
+    }, []),
+  );
 
   const playCpu = () => {
     const player = color === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : color;
@@ -20,6 +29,19 @@ export default function Home() {
 
   return (
     <ScrollView contentContainerStyle={styles.root}>
+      {unfinished && (
+        <View style={[styles.card, styles.continueCard]}>
+          <Text style={styles.heading}>Continue game</Text>
+          <Text style={styles.subtle}>
+            {unfinished.white} vs {unfinished.black} · move {Math.ceil(unfinished.plies / 2)} · {formatDate(unfinished.updatedAt)}
+          </Text>
+          <PrimaryButton
+            label="Continue"
+            onPress={() => router.push({ pathname: '/game', params: { resume: unfinished.id } })}
+          />
+        </View>
+      )}
+
       <View style={styles.card}>
         <Text style={styles.heading}>Play the computer</Text>
 
@@ -56,9 +78,17 @@ export default function Home() {
         <Text style={styles.subtle}>Peer-to-peer games are coming in Phase 2.</Text>
       </View>
 
-      <Link href="/dev" style={styles.devLink}>
-        Dev tools
-      </Link>
+      <View style={styles.links}>
+        <Link href="/history" style={styles.link}>
+          Your games
+        </Link>
+        <Link href="/settings" style={styles.link}>
+          Settings
+        </Link>
+        <Link href="/dev" style={styles.devLink}>
+          Dev tools
+        </Link>
+      </View>
     </ScrollView>
   );
 }
@@ -113,5 +143,8 @@ const styles = StyleSheet.create({
   chipTextSelected: { color: ui.accentText },
   primary: { backgroundColor: ui.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center', marginTop: 6 },
   primaryText: { color: ui.accentText, fontSize: 16, fontWeight: '700' },
+  continueCard: { borderColor: ui.accent, borderWidth: 1.5 },
+  links: { flexDirection: 'row', justifyContent: 'center', gap: 16 },
+  link: { color: ui.accent, fontWeight: '700', padding: 8, fontSize: 15 },
   devLink: { color: ui.subtle, textAlign: 'center', padding: 8 },
 });

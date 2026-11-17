@@ -6,7 +6,7 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Color, PieceSymbol, Square } from '@peermate/core';
-import { board as colors } from '../theme';
+import type { BoardColors } from '../theme';
 
 // Filled glyphs for both sides; colour comes from styling. U+FE0E forces text
 // (not emoji) presentation, which matters for the pawn on Android.
@@ -43,10 +43,12 @@ type Props = {
   checkSquare: Square | null;
   onSquarePress: (square: Square) => void;
   disabled?: boolean;
+  colors: BoardColors;
+  showCoordinates?: boolean;
 };
 
 export const Board = memo(function Board(props: Props) {
-  const { position, size, orientation, onSquarePress, disabled } = props;
+  const { position, size, orientation, onSquarePress, disabled, colors, showCoordinates = true } = props;
   const sq = Math.floor(size / 8);
   const rows = orientation === 'w' ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
   const cols = orientation === 'w' ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
@@ -69,8 +71,9 @@ export const Board = memo(function Board(props: Props) {
                 target={props.targets.includes(square)}
                 last={props.lastMove?.from === square || props.lastMove?.to === square}
                 check={props.checkSquare === square}
-                rankLabel={ci === 0 ? String(8 - r) : null}
-                fileLabel={ri === 7 ? FILES[c] : null}
+                rankLabel={showCoordinates && ci === 0 ? String(8 - r) : null}
+                fileLabel={showCoordinates && ri === 7 ? FILES[c] : null}
+                colors={colors}
                 onPress={onSquarePress}
                 disabled={disabled}
               />
@@ -95,9 +98,11 @@ type SquareProps = {
   fileLabel: string | null;
   onPress: (square: Square) => void;
   disabled?: boolean;
+  colors: BoardColors;
 };
 
 const SquareView = memo(function SquareView(p: SquareProps) {
+  const colors = p.colors;
   const base = p.dark ? colors.dark : colors.light;
   const labelColor = p.dark ? colors.light : colors.dark;
   const overlay = p.check ? colors.check : p.selected ? colors.selected : p.last ? colors.lastMove : null;

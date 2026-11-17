@@ -3,7 +3,7 @@
 Peer-to-peer chess for Android and iOS: play the CPU offline, or find opponents
 worldwide with no servers involved. Full design: [SPECS.md](SPECS.md).
 
-Status: **Phase 1** (offline game: vs CPU and pass & play). Phase 0 spikes are under **Dev tools** in the app.
+Status: **Phase 1** (offline game: vs CPU, pass & play, saved games with resume, review and engine analysis, settings). Phase 0 spikes are under **Dev tools** in the app.
 
 ## Layout
 
