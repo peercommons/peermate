@@ -302,6 +302,11 @@ background: keep retrying direct every 30 s; migrate session to direct if it lat
 - Session migration is seamless because all messages carry `(gameId, seq)` and are idempotent (§6.7).
 - UI shows a connection badge: 🟢 Direct · 🟡 Relayed · 🔴 Reconnecting.
 
+**Phase 0 findings for the Nostr path:**
+- Delivery is **best effort**. In testing, 1 of ~10 app messages was silently lost across all 4 relays. On this path, `MOVE`, `CHAT` and control messages **must** use `ACK` + retransmit (with exponential backoff), and receivers dedupe by `(gid, seq)`.
+- Most relays run strfry, which keeps ephemeral events for a few minutes instead of dropping them, and replays them to new subscribers. Subscriptions use `since: now − 5 s` and dedupe by event id.
+- Measured round trip (ping → pong through relays): ~590 ms desktop↔desktop, ~860 ms emulator↔desktop. Discovery via `hello`: ~1–2.5 s.
+
 ### 6.7 Wire protocol
 - **Encoding:** CBOR (compact) on P2P streams; base64-CBOR inside NIP-44-encrypted Nostr event content.
 - **Envelope:**
@@ -401,7 +406,7 @@ No arbiter exists. Disputed games are marked *disputed* and excluded from both p
 - Message history stored locally in SQLite; relays are not treated as permanent storage.
 
 ### 8.3 Default relays
-Ship a default list of ~6 well-known, geographically diverse public relays (e.g. `wss://relay.damus.io`, `wss://nos.lol`, `wss://relay.primal.net`, `wss://relay.nostr.band`, plus 2 more chosen in Phase 0 based on uptime and ephemeral-event support), user-editable. Publish to ≥3, read from ≥3. Auto-demote relays that fail health checks.
+Ship a default list of public relays chosen by `app/tools/nostr-probe.mjs`, user-editable. Phase 0 probe (2026-11-17, 12 candidates): 7 delivered 5/5 ephemeral events with median latency 260–440 ms (`relay.snort.social`, `relay.damus.io`, `offchain.pub`, `nos.lol`, `nostr.mom`, `relay.nostr.net`, `relay.primal.net`); 5 were unreachable (including `relay.nostr.band`). Re-run the probe before each release and keep ≥ 6 healthy relays. Publish to ≥3, read from ≥3. Auto-demote relays that fail health checks.
 
 ### 8.4 Notifications (limitation)
 - Remote push (APNs/FCM) requires a server holding provider credentials, so **out of scope** under the "no servers we own" rule.

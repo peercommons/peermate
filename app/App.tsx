@@ -1,4 +1,5 @@
-// Phase 0 spike (a): Hyperswarm in a Bare worklet, discovering and talking to peers.
+// Phase 0 spikes (a) + (c): talk to peers directly (Hyperswarm in a Bare worklet)
+// or through public Nostr relays (the fallback path).
 // This screen is throwaway test UI, not the real app.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -13,23 +14,27 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import b4a from 'b4a';
 import p2p from 'expo-bare-kit/workers/p2p/worker';
+import { joinNostrRoom, type NostrRoom } from './net/nostrRoom';
 
 type WorkerMsg =
   | { type: 'ready'; publicKey: string }
   | { type: 'joined'; room: string; topic: string }
-  | { type: 'peer-joined'; id: string; host: string | null; port: number | null; initiator: boolean; connectMs: number | null }
+  | { type: 'peer-joined'; id: string; host?: string | null; port?: number | null; initiator?: boolean; connectMs?: number | null }
   | { type: 'peer-left'; id: string }
   | { type: 'chat'; from: string; text: string }
   | { type: 'rtt'; id: string; ms: number }
   | { type: 'log' | 'error'; message: string };
 
 type Peer = { id: string; addr: string; connectMs: number | null; rtt?: number };
+type Mode = 'p2p' | 'nostr';
 
 const short = (id: string) => id.slice(0, 8);
 const time = () => new Date().toLocaleTimeString();
 
 export default function App() {
   const sendRef = useRef<((msg: object) => void) | null>(null);
+  const nostrRef = useRef<NostrRoom | null>(null);
+  const [mode, setMode] = useState<Mode>('p2p');
   const [status, setStatus] = useState('starting worker…');
   const [myKey, setMyKey] = useState('');
   const [room, setRoom] = useState('lobby');
@@ -55,13 +60,14 @@ export default function App() {
           addLine(`joined "${msg.room}" (topic ${msg.topic.slice(0, 12)}…)`);
           break;
         case 'peer-joined': {
-          const addr = `${msg.host}:${msg.port}`;
+          const addr = msg.host ? `${msg.host}:${msg.port}` : 'via relays';
           setPeers((prev) => [
             ...prev.filter((p) => p.id !== msg.id),
-            { id: msg.id, addr, connectMs: msg.connectMs },
+            { id: msg.id, addr, connectMs: msg.connectMs ?? null },
           ]);
           addLine(
-            `+ ${short(msg.id)} ${addr} ${msg.initiator ? 'out' : 'in'}` +
+            `+ ${short(msg.id)} ${addr}` +
+              (msg.host ? ` ${msg.initiator ? 'out' : 'in'}` : '') +
               (msg.connectMs != null ? ` (${msg.connectMs} ms)` : ''),
           );
           break;
@@ -124,6 +130,44 @@ export default function App() {
 
   const send = (msg: object) => sendRef.current?.(msg);
 
+  useEffect(() => () => nostrRef.current?.close(), []);
+
+  const switchMode = (next: Mode) => {
+    if (next === mode) return;
+    if (mode === 'p2p') send({ type: 'leave' });
+    nostrRef.current?.close();
+    nostrRef.current = null;
+    setPeers([]);
+    setJoined(null);
+    setMode(next);
+    setStatus(next === 'p2p' ? 'direct P2P mode' : 'Nostr relay mode');
+  };
+
+  const join = () => {
+    if (mode === 'p2p') return send({ type: 'join', room });
+    nostrRef.current?.close();
+    setPeers([]);
+    const joinedAt = Date.now();
+    nostrRef.current = joinNostrRoom({
+      room,
+      onEvent: (event) => {
+        if (event.type === 'ready') {
+          setJoined(room);
+          setStatus(`listening in "${room}" via Nostr relays`);
+          addLine(`joined "${room}" via Nostr as ${short(event.publicKey)}`);
+        } else if (event.type === 'peer-joined') {
+          onMessage({ ...event, connectMs: Date.now() - joinedAt });
+        } else {
+          onMessage(event);
+        }
+      },
+    });
+  };
+
+  const chat = (text: string) =>
+    mode === 'p2p' ? send({ type: 'chat', text }) : nostrRef.current?.chat(text);
+  const ping = () => (mode === 'p2p' ? send({ type: 'ping' }) : nostrRef.current?.ping());
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="auto" />
@@ -134,6 +178,11 @@ export default function App() {
       </Text>
 
       <View style={styles.row}>
+        <Button label="Direct P2P" onPress={() => switchMode('p2p')} selected={mode === 'p2p'} />
+        <Button label="Nostr relays" onPress={() => switchMode('nostr')} selected={mode === 'nostr'} />
+      </View>
+
+      <View style={styles.row}>
         <TextInput
           style={styles.input}
           value={room}
@@ -141,8 +190,8 @@ export default function App() {
           autoCapitalize="none"
           placeholder="room"
         />
-        <Button label={joined ? 'Rejoin' : 'Join'} onPress={() => send({ type: 'join', room })} />
-        <Button label="Ping" onPress={() => send({ type: 'ping' })} disabled={!peers.length} />
+        <Button label={joined ? 'Rejoin' : 'Join'} onPress={join} />
+        <Button label="Ping" onPress={ping} disabled={!peers.length} />
       </View>
 
       <Text style={styles.section}>Peers ({peers.length})</Text>
@@ -162,7 +211,7 @@ export default function App() {
           placeholder="message"
           onSubmitEditing={() => {
             if (!draft.trim()) return;
-            send({ type: 'chat', text: draft });
+            chat(draft);
             addLine(`me> ${draft}`);
             setDraft('');
           }}
@@ -179,12 +228,26 @@ export default function App() {
   );
 }
 
-function Button({ label, onPress, disabled }: { label: string; onPress: () => void; disabled?: boolean }) {
+function Button({
+  label,
+  onPress,
+  disabled,
+  selected,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  selected?: boolean;
+}) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={({ pressed }) => [styles.button, (pressed || disabled) && { opacity: 0.5 }]}
+      style={({ pressed }) => [
+        styles.button,
+        selected === false && styles.unselected,
+        (pressed || disabled) && { opacity: 0.5 },
+      ]}
     >
       <Text style={styles.buttonText}>{label}</Text>
     </Pressable>
@@ -199,6 +262,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8 },
   button: { backgroundColor: '#2f6f4f', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 6 },
   buttonText: { color: 'white', fontWeight: '600' },
+  unselected: { backgroundColor: '#9aa' },
   section: { marginTop: 8, fontWeight: '600' },
   mono: { fontFamily: 'monospace', fontSize: 12 },
   log: { flex: 1, marginTop: 8 },
