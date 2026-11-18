@@ -37,7 +37,7 @@ import { block, isBlocked } from './blocklist';
 import { addMessage, MESSAGE_MAX, setStatus, syncedTo } from './messages';
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
-import { RelayNet, type PresenceStatus, type Seek } from './relay';
+import { RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
 
 export const TIME_CONTROLS = ['1+0', '2+1', '3+2', '5+0', '10+0', '15+10'] as const;
@@ -526,17 +526,22 @@ class OnlineController {
     const f = getFriend(friendKey);
     const body = text.trim().slice(0, MESSAGE_MAX);
     if (!f || !body) return;
-    await this.listen();
-    const relay = this.relay;
+    // Show it at once (connecting can take a while on a cold start).
+    const me = await loadMe();
     const at = retry?.at ?? Date.now();
     const createdAt = Math.floor(at / 1000);
-    if (!relay) return;
-    const id = relay.dmId(f.npub, body, createdAt);
+    const id = rumorId(me.identity.nostr.secretKey, f.npub, body, createdAt);
     if (retry) setStatus(f.key, id, 'sending');
     else addMessage(f.key, { id, from: 'me', text: body, at, status: 'sending' });
-    const { ok } = await relay.sendDM(f.npub, body, createdAt);
+    await this.listen();
+    let ok = false;
+    try {
+      ok = this.relay ? (await this.relay.sendDM(f.npub, body, createdAt)).ok : false;
+    } catch (err) {
+      log('message send error:', String(err));
+    }
     setStatus(f.key, id, ok ? 'sent' : 'failed');
-    log('message to', f.nick, ok ? 'sent' : 'failed');
+    log('message to', f.nick, ok ? 'sent' : 'failed', this.relay ? '' : '(no relay connection)');
   }
 
   private myStatus(): PresenceStatus {

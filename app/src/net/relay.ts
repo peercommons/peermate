@@ -59,7 +59,7 @@ const PRESENCE = new Set<string>(['online', 'playing', 'away']);
 const roomTag = (room: string) => `peermate-v1-${room}`;
 
 /** The id the recipient will see for our message (the rumor's event id). */
-function rumorId(sk: Uint8Array, npub: string, text: string, createdAt: number): string {
+export function rumorId(sk: Uint8Array, npub: string, text: string, createdAt: number): string {
   const rumor = nip59.createRumor({ kind: 14, content: text, tags: [['p', npub]], created_at: createdAt }, sk);
   return rumor.id;
 }
