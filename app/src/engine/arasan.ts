@@ -9,7 +9,11 @@ let started: Promise<void> | null = null;
 let queue: Promise<unknown> = Promise.resolve();
 const listeners = new Set<(line: string) => void>();
 
-ArasanEngine.addListener('onLine', ({ line }) => {
+/** False where the engine isn't built yet (iOS): CPU play and analysis are off. */
+export const engineAvailable = ArasanEngine !== null;
+export const ENGINE_UNAVAILABLE = "The CPU opponent isn't available on iOS yet";
+
+ArasanEngine?.addListener('onLine', ({ line }) => {
   for (const listener of [...listeners]) listener(line);
 });
 
@@ -31,7 +35,7 @@ function waitFor(predicate: (line: string) => boolean, timeoutMs = 30000): Promi
 
 function command(cmd: string, until: string, timeoutMs?: number) {
   const done = waitFor((l) => l.startsWith(until), timeoutMs);
-  ArasanEngine.send(cmd);
+  ArasanEngine!.send(cmd);
   return done;
 }
 
@@ -45,12 +49,13 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 /** Starts the engine and loads the network. The first call takes ~1 s. */
 export function initEngine(): Promise<void> {
   started ??= (async () => {
-    const networkPath = await ArasanEngine.start();
+    if (!ArasanEngine) throw new Error(ENGINE_UNAVAILABLE);
+    const networkPath = await ArasanEngine!.start();
     await command('uci', 'uciok');
-    ArasanEngine.send(`setoption name NNUE file value ${networkPath}`);
-    ArasanEngine.send('setoption name OwnBook value false'); // book not shipped (size); SPECS §5.1
-    ArasanEngine.send('setoption name Hash value 16'); // MB
-    ArasanEngine.send('setoption name Threads value 1');
+    ArasanEngine!.send(`setoption name NNUE file value ${networkPath}`);
+    ArasanEngine!.send('setoption name OwnBook value false'); // book not shipped (size); SPECS §5.1
+    ArasanEngine!.send('setoption name Hash value 16'); // MB
+    ArasanEngine!.send('setoption name Threads value 1');
     await command('isready', 'readyok');
   })().catch((err) => {
     started = null;
@@ -63,7 +68,7 @@ export function initEngine(): Promise<void> {
 export function newEngineGame(): Promise<void> {
   return enqueue(async () => {
     await initEngine();
-    ArasanEngine.send('ucinewgame');
+    ArasanEngine!.send('ucinewgame');
     await command('isready', 'readyok');
   });
 }
@@ -77,11 +82,11 @@ async function think(fen: string, level: number): Promise<EngineMove> {
   await initEngine();
   const { config } = getLevel(level);
 
-  ArasanEngine.send(`setoption name UCI_LimitStrength value ${config.kind === 'elo'}`);
-  if (config.kind === 'elo') ArasanEngine.send(`setoption name UCI_Elo value ${config.elo}`);
-  ArasanEngine.send(`setoption name MultiPV value ${config.kind === 'weakened' ? config.multiPv : 1}`);
+  ArasanEngine!.send(`setoption name UCI_LimitStrength value ${config.kind === 'elo'}`);
+  if (config.kind === 'elo') ArasanEngine!.send(`setoption name UCI_Elo value ${config.elo}`);
+  ArasanEngine!.send(`setoption name MultiPV value ${config.kind === 'weakened' ? config.multiPv : 1}`);
   await command('isready', 'readyok');
-  ArasanEngine.send(`position fen ${fen}`);
+  ArasanEngine!.send(`position fen ${fen}`);
 
   // Latest principal-variation move per MultiPV slot (slot 1 = best).
   const candidates = new Map<number, string>();
@@ -113,10 +118,10 @@ export type PositionAnalysis = { score: Score; bestMove: string | null };
 export function analyse(fen: string, movetimeMs: number): Promise<PositionAnalysis> {
   return enqueue(async () => {
     await initEngine();
-    ArasanEngine.send('setoption name UCI_LimitStrength value false');
-    ArasanEngine.send('setoption name MultiPV value 1');
+    ArasanEngine!.send('setoption name UCI_LimitStrength value false');
+    ArasanEngine!.send('setoption name MultiPV value 1');
     await command('isready', 'readyok');
-    ArasanEngine.send(`position fen ${fen}`);
+    ArasanEngine!.send(`position fen ${fen}`);
 
     const sideToMove = fen.split(' ')[1] as Color;
     let score: Score | null = null;

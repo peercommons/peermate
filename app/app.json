@@ -8,7 +8,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.peermate.app"
+      "bundleIdentifier": "com.peermate.app",
+      "appleTeamId": "QGLA89KHM7"
     },
     "android": {
       "adaptiveIcon": {

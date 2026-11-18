@@ -6,6 +6,7 @@ import { LEVELS } from '@peermate/core';
 import { latestUnfinished, type GameRecord } from '../storage/games';
 import { formatDate } from '../game/format';
 import { ui } from '../theme';
+import { engineAvailable, ENGINE_UNAVAILABLE } from '../engine/arasan';
 
 type ColorChoice = 'w' | 'b' | 'random';
 
@@ -62,7 +63,11 @@ export default function Home() {
           <Chip label="Random" selected={color === 'random'} onPress={() => setColor('random')} />
         </View>
 
-        <PrimaryButton label="Start game" onPress={playCpu} />
+        {engineAvailable ? (
+          <PrimaryButton label="Start game" onPress={playCpu} />
+        ) : (
+          <Text style={styles.subtle}>{ENGINE_UNAVAILABLE}.</Text>
+        )}
       </View>
 
       <View style={styles.card}>

@@ -20,7 +20,7 @@ import {
   type Score,
 } from '@peermate/core';
 import { Board } from '../components/Board';
-import { analyse } from '../engine/arasan';
+import { analyse, engineAvailable } from '../engine/arasan';
 import { describeRecordResult, formatDate } from '../game/format';
 import { deleteGame, getGame, saveAnalysis, type GameRecord } from '../storage/games';
 import { useSettings } from '../settings';
@@ -190,7 +190,7 @@ function ReviewView({ record }: { record: GameRecord }) {
       <View style={styles.actions}>
         {!analysis &&
           (progress === null ? (
-            <Action label={`Analyse (~${Math.ceil((fens.length * MOVETIME_MS) / 1000)} s)`} onPress={runAnalysis} disabled={moves.length === 0} />
+            <Action label={`Analyse (~${Math.ceil((fens.length * MOVETIME_MS) / 1000)} s)`} onPress={runAnalysis} disabled={moves.length === 0 || !engineAvailable} />
           ) : (
             <View style={styles.progress}>
               <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />

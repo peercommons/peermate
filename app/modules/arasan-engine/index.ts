@@ -1,4 +1,4 @@
-import { NativeModule, requireNativeModule } from 'expo';
+import { NativeModule, requireOptionalNativeModule } from 'expo';
 
 type ArasanEngineEvents = {
   onLine(event: { line: string }): void;
@@ -12,4 +12,6 @@ declare class ArasanEngineModule extends NativeModule<ArasanEngineEvents> {
   stop(): void;
 }
 
-export default requireNativeModule<ArasanEngineModule>('ArasanEngine');
+// Android only for now: iOS can't run the engine as a child process, so it needs
+// an in-process build (SPECS §5.1). Null where the module isn't available.
+export default requireOptionalNativeModule<ArasanEngineModule>('ArasanEngine');
