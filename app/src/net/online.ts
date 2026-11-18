@@ -34,7 +34,7 @@ import {
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
 import { block, isBlocked } from './blocklist';
-import { addFriend, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
+import { addFriend, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
 import { RelayNet, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
@@ -46,7 +46,7 @@ export const RELAYED_BULLET_WARNING =
   'Playing through relays: each move takes 1–3 s to arrive. The clocks make up for part of the delay, but bullet will feel slow.';
 
 /** A friend's challenge waiting for an answer. */
-export type Invite = { key: string; nick: string; tc: string; at: number };
+export type Invite = { key: string; npub: string; nick: string; fingerprint: string; friend: boolean; tc: string; at: number };
 
 /** How long a friend has to answer a challenge. */
 export const INVITE_TIMEOUT_MS = 120_000;
@@ -141,6 +141,7 @@ class OnlineController {
   private challengeTimer: ReturnType<typeof setTimeout> | null = null;
   /** The one peer a friend-challenge matchmaker is pairing with. */
   private matchmakerPeer: string | null = null;
+  private listening = false;
   /** When the current direct link to the opponent came up (grace period for the stale check). */
   private directSince = 0;
 
@@ -419,8 +420,8 @@ class OnlineController {
   }
 
   private closeTransports() {
-    // With friends, stay reachable for their challenges while the app is open.
-    if (friends().length > 0) {
+    // Listening for challenges: keep the transports, just stop seeking.
+    if (this.listening) {
       this.relay?.unseek();
       return;
     }
@@ -470,11 +471,14 @@ class OnlineController {
   // ---- friends ------------------------------------------------------------
 
   /**
-   * Stays reachable for friends' challenges while the app is open: the P2P
-   * worker listens on our key, and the relay inbox is subscribed.
+   * Stays reachable for challenges while the app is open: the P2P worker
+   * listens on our key, and the relay inbox is subscribed. Anyone who has our
+   * friend link (or played us) can challenge; a challenge isn't limited to
+   * people already in our friends, since sharing a link is how it starts.
    */
   async listen(): Promise<void> {
-    if (friends().length === 0 || (this.relay && this.worker)) return;
+    this.listening = true;
+    if (this.relay && this.worker) return;
     try {
       const [me, worker] = await Promise.all([loadMe(), getWorker()]);
       this.openTransports(me, worker);
@@ -494,7 +498,7 @@ class OnlineController {
     }
     if (env.body.t !== 'HELLO' || !env.body.invite) return;
     const hello = env.body;
-    if (!isFriend(peer) || isBlocked(peer)) return;
+    if (isBlocked(peer)) return;
     try {
       parseTimeControl(hello.invite!);
     } catch {
@@ -506,7 +510,15 @@ class OnlineController {
     if (busy) return this.sendDecline(peer, 'busy');
     if (this.invite?.key === peer && this.invite.tc === hello.invite) return; // a resend
     log('invite from', hello.nick, hello.invite);
-    this.invite = { key: peer, nick: getFriend(peer)?.nick ?? hello.nick, tc: hello.invite!, at: Date.now() };
+    this.invite = {
+      key: peer,
+      npub: hello.npub,
+      nick: getFriend(peer)?.nick ?? hello.nick.slice(0, 32),
+      fingerprint: fingerprint(peer),
+      friend: isFriend(peer),
+      tc: hello.invite!,
+      at: Date.now(),
+    };
     if (this.inviteTimer) clearTimeout(this.inviteTimer);
     this.inviteTimer = setTimeout(() => this.clearInvite(), INVITE_TIMEOUT_MS);
     this.emit();
@@ -544,9 +556,9 @@ class OnlineController {
     const inv = this.invite;
     if (!inv) return;
     this.clearInvite();
-    const friend = getFriend(inv.key);
-    if (!friend) return;
-    await this.pair(friend.key, friend.npub, friend.nick, inv.tc, false);
+    // Accepting someone's challenge makes them a friend (so you can challenge back).
+    addFriend(inv.key, inv.npub, inv.nick);
+    await this.pair(inv.key, inv.npub, inv.nick, inv.tc, false);
   }
 
   declineInvite(): void {

@@ -11,7 +11,7 @@ export default function RootLayout() {
   // An online game that was running when the app closed carries on.
   useEffect(() => {
     if (online.savedOpponent()) online.resumeSaved();
-    void online.listen(); // reachable for friends' challenges while the app is open
+    void online.listen(); // reachable for challenges while the app is open
   }, []);
 
   // A friend's challenge, wherever the player is in the app.
@@ -20,7 +20,8 @@ export default function RootLayout() {
     if (!invite) return;
     Alert.alert(
       `${invite.nick} challenges you`,
-      `${invite.tc} (minutes + seconds per move)`,
+      `${invite.tc} (minutes + seconds per move)\nID ${invite.fingerprint}` +
+        (invite.friend ? '' : `\n\n${invite.nick} isn't in your friends yet. Accepting adds them.`),
       [
         { text: 'Decline', style: 'cancel', onPress: () => online.declineInvite() },
         {
