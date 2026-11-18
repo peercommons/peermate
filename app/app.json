@@ -63,7 +63,16 @@
       ],
       "./plugins/without-remote-push.js",
       "expo-notifications",
-      "expo-background-task"
+      "expo-background-task",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Peermate uses the camera to scan a friend's QR code.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ]
     ],
     "scheme": "peermate"
   }

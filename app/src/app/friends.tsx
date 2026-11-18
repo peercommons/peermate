@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
+import QRCode from 'react-native-qrcode-svg';
 import { addFriend, friendLink, parseFriendLink, removeFriend, useFriends, type Friend } from '../net/friends';
 import { online, presenceOf, TIME_CONTROLS, usePresence } from '../net/online';
 import { useUnread } from '../net/messages';
@@ -28,6 +29,7 @@ export default function FriendsScreen() {
   const [me, setMe] = useState<Me | null>(null);
   const [paste, setPaste] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [showQr, setShowQr] = useState(false);
 
   useEffect(() => {
     loadMe().then(setMe, () => undefined);
@@ -55,7 +57,9 @@ export default function FriendsScreen() {
     <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
       <View style={styles.card}>
         <Text style={styles.heading}>Your friend link</Text>
-        <Text style={styles.subtle}>Send it to a friend. When they open it, you're added to their friends.</Text>
+        <Text style={styles.subtle}>
+          Send it to a friend, or let them scan your QR code. When they open it, you're added to their friends.
+        </Text>
         <Pressable
           disabled={!myLink}
           onPress={() => myLink && Share.share({ message: `Play chess with me on Peermate: ${myLink}` })}
@@ -64,10 +68,30 @@ export default function FriendsScreen() {
         >
           <Text style={styles.primaryText}>Share my link</Text>
         </Pressable>
+        <Pressable
+          disabled={!myLink}
+          onPress={() => setShowQr((v) => !v)}
+          style={({ pressed }) => [styles.secondary, pressed && { opacity: 0.7 }]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.secondaryText}>{showQr ? 'Hide QR code' : 'Show my QR code'}</Text>
+        </Pressable>
+        {showQr && myLink && (
+          <View style={styles.qr} accessibilityLabel="Your friend QR code">
+            <QRCode value={myLink} size={220} ecl="M" backgroundColor="#fff" color="#000" />
+          </View>
+        )}
       </View>
 
       <View style={styles.card}>
         <Text style={styles.heading}>Add a friend</Text>
+        <Pressable
+          onPress={() => router.push('/scan')}
+          style={({ pressed }) => [styles.primary, pressed && { opacity: 0.7 }]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.primaryText}>Scan their QR code</Text>
+        </Pressable>
         <TextInput
           value={paste}
           onChangeText={setPaste}
@@ -89,7 +113,7 @@ export default function FriendsScreen() {
       <Text style={styles.section}>Friends</Text>
       {list.length === 0 && (
         <Text style={styles.subtle}>
-          No friends yet. Share your link, add theirs, or tap "Add as friend" after an online game.
+          No friends yet. Share your link or QR code, add theirs, or tap "Add as friend" after an online game.
         </Text>
       )}
       {list.map((f) => (
@@ -181,6 +205,9 @@ const styles = StyleSheet.create({
   error: { color: '#b3261e' },
   primary: { backgroundColor: ui.accent, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   primaryText: { color: ui.accentText, fontWeight: '700' },
+  secondary: { borderWidth: 1, borderColor: ui.accent, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  secondaryText: { color: ui.accent, fontWeight: '700' },
+  qr: { alignSelf: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 12, marginTop: 4 },
   small: { backgroundColor: ui.accent, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {

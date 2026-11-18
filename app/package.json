@@ -10,6 +10,7 @@
     "expo-background-task": "~58.0.13",
     "expo-bare-kit": "^0.3.0",
     "expo-build-properties": "~58.0.12",
+    "expo-camera": "~58.0.14",
     "expo-constants": "~58.0.16",
     "expo-crypto": "~58.0.8",
     "expo-haptics": "~58.0.8",
@@ -28,6 +29,7 @@
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
     "react-native-bare-kit": "^0.17.1",
+    "react-native-qrcode-svg": "^6.3.54",
     "react-native-safe-area-context": "~5.11.1",
     "react-native-screens": "~4.30.1",
     "react-native-svg": "15.16.0"
