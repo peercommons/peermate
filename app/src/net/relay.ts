@@ -20,6 +20,8 @@ export const PEERMATE_KIND = 25050;
 export const DEFAULT_RELAYS = ['wss://relay.snort.social', 'wss://relay.damus.io', 'wss://offchain.pub', 'wss://nos.lol'];
 
 const SEEK_REPEAT_MS = 20_000;
+const RESUBSCRIBE_MIN_MS = 2_000;
+const RESUBSCRIBE_MAX_MS = 30_000;
 /** Seeks older than this are ignored (strfry relays replay ephemeral events for minutes). */
 const SEEK_MAX_AGE_S = 45;
 const MAX_SEEN = 2000;
@@ -42,7 +44,8 @@ export class RelayNet {
   readonly npub: string;
   private readonly sk: Uint8Array;
   private readonly relays: string[];
-  private readonly pool = new SimplePool();
+  // Ping idle connections and reconnect dropped ones (subscriptions included).
+  private readonly pool = new SimplePool({ enablePing: true, enableReconnect: true });
   private readonly seen = new Set<string>();
   private readonly keys = new Map<string, Uint8Array>();
   private readonly opts: RelayOptions;
@@ -55,11 +58,50 @@ export class RelayNet {
     this.sk = opts.nostrSecret;
     this.npub = getPublicKey(this.sk);
     this.relays = opts.relays ?? DEFAULT_RELAYS;
-    this.inbox = this.pool.subscribeMany(
-      this.relays,
-      { kinds: [PEERMATE_KIND], '#p': [this.npub], since: Math.floor(Date.now() / 1000) - 10 },
-      { onevent: (e) => this.onDirect(e) },
+    this.inbox = this.resilient(
+      () => ({ kinds: [PEERMATE_KIND], '#p': [this.npub], since: Math.floor(Date.now() / 1000) - 10 }),
+      (e) => this.onDirect(e),
     );
+  }
+
+  /**
+   * A subscription that comes back if every relay drops it. nostr-tools gives up
+   * on a relay whose first connection fails (e.g. offline at that moment), which
+   * would leave us deaf while our publishes still go out.
+   */
+  private resilient(
+    filter: () => Record<string, unknown>,
+    onevent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
+  ): { close(): void } {
+    let stopped = false;
+    let delay = RESUBSCRIBE_MIN_MS;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let sub: { close(): void } | null = null;
+    const open = () => {
+      if (stopped || this.closed) return;
+      const opened = Date.now();
+      sub = this.pool.subscribeMany(this.relays, filter() as never, {
+        onevent: (e) => {
+          delay = RESUBSCRIBE_MIN_MS;
+          onevent(e);
+        },
+        onclose: () => {
+          if (stopped || this.closed) return;
+          // Back off only if it failed quickly (couldn't connect at all).
+          delay = Date.now() - opened > 60_000 ? RESUBSCRIBE_MIN_MS : Math.min(RESUBSCRIBE_MAX_MS, delay * 2);
+          this.opts.onLog?.(`relay subscription closed; retrying in ${Math.round(delay / 1000)} s`);
+          timer = setTimeout(open, delay);
+        },
+      });
+    };
+    open();
+    return {
+      close: () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
+        sub?.close();
+      },
+    };
   }
 
   private firstSighting(id: string): boolean {
@@ -120,25 +162,22 @@ export class RelayNet {
         );
       }
     };
-    const sub = this.pool.subscribeMany(
-      this.relays,
-      { kinds: [PEERMATE_KIND], '#t': tags, since: Math.floor(Date.now() / 1000) - SEEK_MAX_AGE_S },
-      {
-        onevent: (e) => {
-          if (e.pubkey === this.npub || !this.firstSighting(e.id)) return;
-          if (Date.now() / 1000 - e.created_at > SEEK_MAX_AGE_S) return;
-          let c: { v?: number; pk?: unknown; tc?: unknown; nick?: unknown };
-          try {
-            c = JSON.parse(e.content);
-          } catch {
-            return;
-          }
-          if (c.v !== 1 || typeof c.pk !== 'string' || !/^[0-9a-f]{64}$/.test(c.pk)) return;
-          if (typeof c.tc !== 'string' || typeof c.nick !== 'string') return;
-          const tag = e.tags.find((t) => t[0] === 't')?.[1] ?? '';
-          const room = tag.startsWith('peermate-v1-') ? tag.slice('peermate-v1-'.length) : tag;
-          this.opts.onSeek?.({ room, peer: c.pk, npub: e.pubkey, tc: c.tc, nick: c.nick.slice(0, 32) });
-        },
+    const sub = this.resilient(
+      () => ({ kinds: [PEERMATE_KIND], '#t': tags, since: Math.floor(Date.now() / 1000) - SEEK_MAX_AGE_S }),
+      (e) => {
+        if (e.pubkey === this.npub || !this.firstSighting(e.id)) return;
+        if (Date.now() / 1000 - e.created_at > SEEK_MAX_AGE_S) return;
+        let c: { v?: number; pk?: unknown; tc?: unknown; nick?: unknown };
+        try {
+          c = JSON.parse(e.content);
+        } catch {
+          return;
+        }
+        if (c.v !== 1 || typeof c.pk !== 'string' || !/^[0-9a-f]{64}$/.test(c.pk)) return;
+        if (typeof c.tc !== 'string' || typeof c.nick !== 'string') return;
+        const tag = e.tags.find((t) => t[0] === 't')?.[1] ?? '';
+        const room = tag.startsWith('peermate-v1-') ? tag.slice('peermate-v1-'.length) : tag;
+        this.opts.onSeek?.({ room, peer: c.pk, npub: e.pubkey, tc: c.tc, nick: c.nick.slice(0, 32) });
       },
     );
     announce();
