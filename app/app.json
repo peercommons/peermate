@@ -37,7 +37,8 @@
             "buildArchs": [
               "arm64-v8a",
               "x86_64"
-            ]
+            ],
+            "extraProguardRules": "# WorkManager (expo-background-task) builds its Room database by reflection; R8 stripped the constructor.\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.work.impl.WorkDatabase_Impl { *; }"
           }
         }
       ],
