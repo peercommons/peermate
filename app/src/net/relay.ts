@@ -64,6 +64,40 @@ export function rumorId(sk: Uint8Array, npub: string, text: string, createdAt: n
   return rumor.id;
 }
 
+/**
+ * One-off fetch of our private messages since `sinceS` (for the background
+ * check): connect, collect for up to `maxWaitMs`, disconnect.
+ */
+export async function fetchDMsOnce(
+  nostrSecret: Uint8Array,
+  sinceS: number,
+  maxWaitMs = 15_000,
+  relays = DEFAULT_RELAYS,
+): Promise<{ id: string; from: string; text: string; at: number }[]> {
+  const me = getPublicKey(nostrSecret);
+  const pool = new SimplePool();
+  pool.automaticallyAuth = () => async (event) => finalizeEvent(event, nostrSecret);
+  try {
+    const events = await pool.querySync(
+      relays,
+      { kinds: [1059], '#p': [me], since: Math.max(1, sinceS - 2 * 24 * 3600 - 600) },
+      { maxWait: maxWaitMs },
+    );
+    const out = new Map<string, { id: string; from: string; text: string; at: number }>();
+    for (const e of events) {
+      try {
+        const r = nip17.unwrapEvent(e as never, nostrSecret) as { id: string; pubkey: string; kind: number; content: string; created_at: number };
+        if (r.kind === 14 && typeof r.content === 'string') out.set(r.id, { id: r.id, from: r.pubkey, text: r.content, at: r.created_at * 1000 });
+      } catch {
+        // not for us, or forged
+      }
+    }
+    return [...out.values()].sort((a, b) => a.at - b.at);
+  } finally {
+    pool.destroy();
+  }
+}
+
 export class RelayNet {
   readonly npub: string;
   private readonly sk: Uint8Array;

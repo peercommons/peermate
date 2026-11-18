@@ -34,7 +34,8 @@ import {
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
 import { block, isBlocked } from './blocklist';
-import { addMessage, MESSAGE_MAX, setStatus, syncedTo } from './messages';
+import { addMessage, isUnread, MESSAGE_MAX, setStatus, syncedTo } from './messages';
+import { notifyMessage } from './notify';
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
 import { RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';
@@ -524,7 +525,10 @@ class OnlineController {
       return;
     }
     log('message from', f.nick, new Date(dm.at).toISOString());
-    addMessage(f.key, { id: dm.id, from: 'them', text: dm.text.slice(0, MESSAGE_MAX), at: dm.at });
+    const text = dm.text.slice(0, MESSAGE_MAX);
+    if (addMessage(f.key, { id: dm.id, from: 'them', text, at: dm.at }) && isUnread(f.key, dm.at)) {
+      notifyMessage(f.key, f.nick, text);
+    }
   }
 
   /**

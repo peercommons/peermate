@@ -2,6 +2,9 @@ import '../../polyfills'; // must run before anything that generates keys
 import { useEffect } from 'react';
 import { Alert } from 'react-native';
 import { Stack, router } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { registerBackgroundCheck } from '../background';
+import { friendOf, setupNotifications } from '../net/notify';
 import { online, useInvite } from '../net/online';
 import { StatusBar } from 'expo-status-bar';
 import { SettingsProvider } from '../settings';
@@ -12,6 +15,16 @@ export default function RootLayout() {
   useEffect(() => {
     if (online.savedOpponent()) online.resumeSaved();
     void online.listen(); // reachable for challenges while the app is open
+    setupNotifications();
+    void registerBackgroundCheck();
+    // A tapped message notification opens that conversation (also from a cold start).
+    const open = (r: Notifications.NotificationResponse | null) => {
+      const key = friendOf(r);
+      if (key) router.push({ pathname: '/chat/[key]', params: { key } });
+    };
+    void Notifications.getLastNotificationResponseAsync().then(open);
+    const sub = Notifications.addNotificationResponseReceivedListener(open);
+    return () => sub.remove();
   }, []);
 
   // A friend's challenge, wherever the player is in the app.

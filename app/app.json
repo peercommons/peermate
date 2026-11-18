@@ -59,7 +59,9 @@
             ]
           ]
         }
-      ]
+      ],
+      "expo-notifications",
+      "expo-background-task"
     ],
     "scheme": "peermate"
   }

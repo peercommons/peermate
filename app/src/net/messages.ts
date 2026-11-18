@@ -48,13 +48,19 @@ export function syncedTo(): number {
   return store.syncedTo;
 }
 
-/** Adds a message (ignores one we already have), keeping the thread in time order. */
-export function addMessage(friend: string, m: Message): void {
+/** Adds a message (ignores one we already have), keeping the thread in time order. True if new. */
+export function addMessage(friend: string, m: Message): boolean {
   const thread = store.threads[friend] ?? [];
-  if (thread.some((x) => x.id === m.id)) return;
+  if (thread.some((x) => x.id === m.id)) return false;
   const next = [...thread, m].sort((a, b) => a.at - b.at).slice(-MAX_PER_FRIEND);
   const syncedS = m.from === 'them' ? Math.max(store.syncedTo, Math.floor(m.at / 1000)) : store.syncedTo;
   save({ ...store, threads: { ...store.threads, [friend]: next }, syncedTo: syncedS });
+  return true;
+}
+
+/** Whether a message from them arrived after the thread was last read. */
+export function isUnread(friend: string, at: number): boolean {
+  return at > (store.readAt[friend] ?? 0);
 }
 
 export function setStatus(friend: string, id: string, status: Message['status']): void {

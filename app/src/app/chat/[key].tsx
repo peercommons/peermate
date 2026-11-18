@@ -1,11 +1,12 @@
 // A private conversation with one friend (NIP-17 messages through relays).
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { ScreenView } from '../../components/ScreenView';
 import { getFriend } from '../../net/friends';
 import { markRead, MESSAGE_MAX, useThread, type Message } from '../../net/messages';
+import { setOpenChat } from '../../net/notify';
 import { online } from '../../net/online';
 import { ui } from '../../theme';
 
@@ -24,6 +25,14 @@ export default function ChatScreen() {
   useEffect(() => {
     void online.listen();
   }, []);
+
+  // No notifications for the conversation on screen.
+  useFocusEffect(
+    useCallback(() => {
+      setOpenChat(String(key));
+      return () => setOpenChat(null);
+    }, [key]),
+  );
 
   if (!friend) {
     return (
