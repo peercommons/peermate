@@ -9,6 +9,7 @@
 // Hyperswarm keeps redialing a matched opponent, so a relayed game moves to a
 // direct connection whenever one succeeds.
 import { useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
 import { appLog } from '../../modules/peermate-log';
 import Storage from 'expo-sqlite/kv-store';
 import {
@@ -67,6 +68,14 @@ const log = (...args: unknown[]) => appLog('online', ...args);
 
 /** A running online game, saved as it's played so it survives an app restart. */
 const ACTIVE_KEY = 'online.active.v1';
+
+/**
+ * A direct link the opponent has been silent on for this long is presumed dead
+ * (their session pings every 5 s). A suspended iPhone, for one, leaves the other
+ * side's connection looking open for minutes.
+ */
+const STALE_DIRECT_MS = 12_000;
+const LINK_CHECK_MS = 2_000;
 const RECONNECTING = 'Reconnecting to your game…';
 type SavedGame = {
   v: 1;
@@ -100,6 +109,15 @@ class OnlineController {
   private router: PeerRouter | null = null;
   private startedAt = 0;
   private resuming: Promise<boolean> | null = null;
+  /** When the current direct link to the opponent came up (grace period for the stale check). */
+  private directSince = 0;
+
+  constructor() {
+    setInterval(() => this.checkLink(), LINK_CHECK_MS);
+    AppState.addEventListener('change', (s) => {
+      if (s === 'active') this.onForeground();
+    });
+  }
 
   get gameId(): string | null {
     return this.match?.game.start.gid ?? null;
@@ -345,6 +363,37 @@ class OnlineController {
     return this.match?.opponent.key === peer;
   }
 
+  private gameRunning(): boolean {
+    return this.state.phase === 'game' && !this.state.end && !!this.match && !!this.session;
+  }
+
+  /** Falls back to the relays when a direct link has gone quiet, and re-dials it. */
+  private checkLink() {
+    if (!this.gameRunning() || !this.router) return;
+    const peer = this.match!.opponent.key;
+    if (this.router.route(peer) !== 'direct') return;
+    const silent = this.session!.silenceMs();
+    if (silent < STALE_DIRECT_MS || Date.now() - this.directSince < STALE_DIRECT_MS) return;
+    log('direct link silent for', Math.round(silent / 1000), 's; switching to relays and re-dialling');
+    this.router.directDown(peer);
+    this.worker?.send({ type: 'drop', peer });
+    this.worker?.send({ type: 'connect', peer });
+    this.routeChanged();
+  }
+
+  /**
+   * Back from the background. iOS suspends the app (and its connections) soon
+   * after it leaves the screen: catch up at once instead of waiting for retries.
+   */
+  private onForeground() {
+    if (!this.gameRunning()) return;
+    log('foreground; silent for', Math.round(this.session!.silenceMs() / 1000), 's');
+    this.checkLink();
+    const peer = this.match!.opponent.key;
+    if (this.router?.route(peer) !== 'direct') this.worker?.send({ type: 'connect', peer });
+    this.match!.channel.resync();
+  }
+
   /** Re-evaluates the opponent's route after a transport change. */
   private routeChanged() {
     if (!this.match || this.state.phase !== 'game' || this.state.end) return;
@@ -394,6 +443,7 @@ class OnlineController {
       case 'peer-joined':
         this.router?.directUp(e.id);
         if (this.isOpponent(e.id)) {
+          this.directSince = Date.now();
           this.routeChanged();
         } else if (this.state.phase === 'seeking') {
           this.noteLobbyPeer(e.id);

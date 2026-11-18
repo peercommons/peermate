@@ -38,6 +38,7 @@ let session = null
 let match = null
 let mm = null
 let host = null
+let directSince = 0
 
 const relay = new RelayNet({
   nostrSecret: identity.nostr.secretKey,
@@ -82,6 +83,7 @@ if (!relayOnly) {
         case 'peer-joined':
           router.directUp(msg.id)
           if (match?.opponent.key === msg.id) {
+            directSince = Date.now()
             match.channel.resync()
             routeNote()
           } else {
@@ -127,6 +129,20 @@ mm = new Matchmaker({
     session = new GameSession({ channel: m.channel, game: m.game, onEvent })
     session.chat({ quick: 'gl' })
     maybeMove()
+    // A direct link the opponent has gone quiet on (e.g. a suspended iPhone) is
+    // presumed dead: use the relays and re-dial, as the app does.
+    const linkWatch = setInterval(() => {
+      if (session.end) return clearInterval(linkWatch)
+      const peer = m.opponent.key
+      if (router.route(peer) !== 'direct') return
+      if (session.silenceMs() < 12_000 || Date.now() - directSince < 12_000) return
+      log(`direct link silent for ${Math.round(session.silenceMs() / 1000)} s; switching to relays`)
+      router.directDown(peer)
+      host?.send({ type: 'drop', peer })
+      host?.send({ type: 'connect', peer })
+      m.channel.resync()
+      routeNote()
+    }, 2000)
     // Claim a win on time once the opponent's clock runs out (as the app does).
     const flagWatch = setInterval(() => {
       if (session.end) return clearInterval(flagWatch)
