@@ -504,8 +504,10 @@ class OnlineController {
       const { relay } = this.openTransports(me, worker);
       log('listening for friends');
       if (!this.dms) {
-        log('fetching messages since', new Date(syncedTo() * 1000).toISOString(), 'from', friends().length, 'friend(s)');
-        this.dms = relay.receiveDMs(syncedTo(), (dm) => this.onDM(dm));
+        // First time on this device: the last 30 days (relays keep messages a while).
+        const since = syncedTo() || Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+        log('fetching messages since', new Date(since * 1000).toISOString(), 'from', friends().length, 'friend(s)');
+        this.dms = relay.receiveDMs(since, (dm) => this.onDM(dm));
       }
       this.presenceTimer ??= setInterval(() => this.announce(), PRESENCE_EVERY_MS);
       this.announce();

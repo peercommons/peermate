@@ -226,7 +226,7 @@ export class RelayNet {
     const seen = new Set<string>();
     return this.resilient(
       'messages',
-      () => ({ kinds: [1059], '#p': [this.npub], since: sinceS - 2 * 24 * 3600 - 600 }),
+      () => ({ kinds: [1059], '#p': [this.npub], since: Math.max(1, sinceS - 2 * 24 * 3600 - 600) }),
       (e) => {
         let rumor: { id: string; pubkey: string; kind: number; content: string; created_at: number };
         try {
