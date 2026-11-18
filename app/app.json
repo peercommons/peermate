@@ -9,7 +9,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.peermate.app",
-      "appleTeamId": "QGLA89KHM7"
+      "appleTeamId": "QGLA89KHM7",
+      "entitlements": {
+        "com.apple.developer.kernel.extended-virtual-addressing": true
+      }
     },
     "android": {
       "adaptiveIcon": {
