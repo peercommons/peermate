@@ -2,12 +2,18 @@
 // then one game. Screens read it with useOnline(); it outlives screen changes so
 // a game keeps running if the player navigates away.
 //
-// Transport: Hyperswarm only in this slice (direct, hole-punched). If the
-// opponent's connection drops, we redial their key and resync; the Nostr
-// relay fallback (§6.6) comes next.
+// Transports (§6.6): direct Hyperswarm connections (hole-punched) and public
+// Nostr relays, side by side. Seeks go out on both; each peer is reached
+// directly when a connection is up, otherwise through relays, and the game
+// moves between the two without interruption (the channel resyncs on a switch).
+// Hyperswarm keeps redialing a matched opponent, so a relayed game moves to a
+// direct connection whenever one succeeds.
 import { useSyncExternalStore } from 'react';
 import {
+  decode,
   fingerprint,
+  PeerRouter,
+  wireSender,
   GameSession,
   lobbyRoom,
   Matchmaker,
@@ -20,12 +26,13 @@ import {
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
 import { loadMe } from './profile';
+import { RelayNet, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
 
 export const TIME_CONTROLS = ['3+2', '5+0', '10+0', '15+10'] as const;
 
 export type ChatLine = { from: 'me' | 'opponent'; text: string; at: number };
-export type Connection = 'direct' | 'reconnecting';
+export type Connection = 'direct' | 'relayed' | 'reconnecting';
 
 export type OnlineState =
   | { phase: 'idle' }
@@ -65,6 +72,8 @@ class OnlineController {
   private matchmaker: Matchmaker | null = null;
   private match: Match | null = null;
   private lobbyPeers = new Set<string>();
+  private relay: RelayNet | null = null;
+  private router: PeerRouter | null = null;
   private startedAt = 0;
 
   get gameId(): string | null {
@@ -97,18 +106,30 @@ class OnlineController {
       if ((this.state as OnlineState).phase !== 'starting') return; // cancelled meanwhile
       this.worker = worker;
       this.lobbyPeers.clear();
+      const relay = new RelayNet({
+        nostrSecret: me.identity.nostr.secretKey,
+        peerKey: me.identity.peer.publicKey,
+        onMessage: (npub, wire) => this.onRelayMessage(npub, wire),
+        onSeek: (seek) => this.onRelaySeek(seek),
+      });
+      const router = new PeerRouter({
+        directSend: (peer, data) => worker.send({ type: 'send', peer, data }),
+        directDrop: (peer) => worker.send({ type: 'drop', peer }),
+        relaySend: (npub, wire) => relay.send(npub, wire),
+      });
+      this.relay = relay;
+      this.router = router;
       this.matchmaker = new Matchmaker({
         identity: me.identity,
         nick: me.profile.nick,
         tc,
-        network: {
-          send: (peer, data) => worker.send({ type: 'send', peer, data }),
-          drop: (peer) => worker.send({ type: 'drop', peer }),
-        },
+        network: router,
         onMatch: (m) => this.onMatch(m, tc),
       });
       this.unsubscribe = worker.on((e) => this.onWorkerEvent(e));
-      worker.send({ type: 'seek', rooms: [lobbyRoom(timeControlClass(tc), 'any')] });
+      const rooms = [lobbyRoom(timeControlClass(tc), 'any')];
+      worker.send({ type: 'seek', rooms });
+      relay.seek(rooms, { tc, nick: me.profile.nick });
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0 });
     } catch (err) {
       this.set({ phase: 'error', message: (err as Error).message });
@@ -120,8 +141,7 @@ class OnlineController {
     this.matchmaker?.close();
     this.matchmaker = null;
     this.worker?.send({ type: 'unseek' });
-    this.unsubscribe?.();
-    this.unsubscribe = null;
+    this.closeTransports();
     this.set({ phase: 'idle' });
   }
 
@@ -132,25 +152,77 @@ class OnlineController {
     this.session = null;
     if (this.match) {
       this.match.channel.close();
-      this.worker?.send({ type: 'drop', peer: this.match.opponent.key });
+      this.router?.drop(this.match.opponent.key);
     }
     this.match = null;
     this.matchmaker = null;
+    this.closeTransports();
+    if (this.state.phase !== 'idle') this.set({ phase: 'idle' });
+  }
+
+  private closeTransports() {
     this.unsubscribe?.();
     this.unsubscribe = null;
-    if (this.state.phase !== 'idle') this.set({ phase: 'idle' });
+    this.relay?.close();
+    this.relay = null;
+    this.router = null;
+  }
+
+  private isOpponent(peer: string) {
+    return this.match?.opponent.key === peer;
+  }
+
+  /** Re-evaluates the opponent's route after a transport change. */
+  private routeChanged() {
+    if (!this.match || this.state.phase !== 'game' || this.state.end) return;
+    const route = this.router?.route(this.match.opponent.key) ?? null;
+    const connection: Connection = route === 'direct' ? 'direct' : route === 'relay' ? 'relayed' : 'reconnecting';
+    if (connection !== this.state.connection) {
+      this.match.channel.resync(); // replay anything lost in the switch
+      this.patchGame({ connection });
+    }
+  }
+
+  private noteLobbyPeer(peer: string) {
+    if (this.state.phase !== 'seeking' || this.lobbyPeers.has(peer)) return;
+    this.lobbyPeers.add(peer);
+    this.set({ ...this.state, lobbyPeers: this.lobbyPeers.size });
+  }
+
+  /** Another player's seek on the relays. */
+  private onRelaySeek(seek: Seek) {
+    if (this.state.phase !== 'seeking' || seek.tc !== this.state.tc || !this.router) return;
+    // Seeks are unsigned: never let one overwrite a route we already have.
+    if (!this.router.npubOf(seek.peer)) this.router.relayKnown(seek.peer, seek.npub);
+    this.worker?.send({ type: 'connect', peer: seek.peer }); // try for a direct link too
+    this.noteLobbyPeer(seek.peer);
+    this.matchmaker?.peerConnected(seek.peer);
+  }
+
+  /** A protocol message through the relays. */
+  private onRelayMessage(npub: string, wire: string) {
+    const peer = wireSender(wire);
+    if (!peer || !this.router) return;
+    // Bind peer key -> Nostr key only from a validly signed message.
+    if (!decode(wire)) return;
+    this.router.relayKnown(peer, npub);
+    if (!this.isOpponent(peer)) {
+      if (this.state.phase !== 'seeking') return;
+      this.noteLobbyPeer(peer);
+      this.matchmaker?.peerConnected(peer);
+    }
+    this.matchmaker?.peerData(peer, wire);
   }
 
   private onWorkerEvent(e: WorkerEvent) {
     const mm = this.matchmaker;
     switch (e.type) {
       case 'peer-joined':
-        if (this.match?.opponent.key === e.id) {
-          this.match.channel.resync(); // back after a drop: replay anything missed
-          this.patchGame({ connection: 'direct' });
+        this.router?.directUp(e.id);
+        if (this.isOpponent(e.id)) {
+          this.routeChanged();
         } else if (this.state.phase === 'seeking') {
-          this.lobbyPeers.add(e.id);
-          this.set({ ...this.state, lobbyPeers: this.lobbyPeers.size });
+          this.noteLobbyPeer(e.id);
           mm?.peerConnected(e.id);
         }
         return;
@@ -158,10 +230,11 @@ class OnlineController {
         mm?.peerData(e.from, e.data);
         return;
       case 'peer-left':
-        if (this.match?.opponent.key === e.id) {
+        this.router?.directDown(e.id);
+        if (this.isOpponent(e.id)) {
           if (this.state.phase === 'game' && !this.state.end) {
-            this.patchGame({ connection: 'reconnecting' });
-            this.worker?.send({ type: 'connect', peer: e.id }); // redial by key
+            this.worker?.send({ type: 'connect', peer: e.id }); // keep trying direct
+            this.routeChanged();
           }
         } else {
           this.lobbyPeers.delete(e.id);
@@ -175,6 +248,10 @@ class OnlineController {
   private onMatch(m: Match, tc: string) {
     this.match = m;
     this.worker?.send({ type: 'unseek' });
+    this.relay?.unseek();
+    // Not directly connected (paired via relays)? Keep dialing for a direct link.
+    const route = this.router?.route(m.opponent.key) ?? null;
+    if (route !== 'direct') this.worker?.send({ type: 'connect', peer: m.opponent.key });
     this.startedAt = Date.now();
     this.session = new GameSession({ channel: m.channel, game: m.game, onEvent: (e) => this.onSessionEvent(e) });
     this.set({
@@ -182,7 +259,7 @@ class OnlineController {
       tc,
       myColor: m.game.myColor,
       opponent: { key: m.opponent.key, nick: m.opponent.nick, fingerprint: fingerprint(m.opponent.key) },
-      connection: 'direct',
+      connection: route === 'direct' ? 'direct' : 'relayed',
       end: null,
       drawOffered: false,
       notice: null,
@@ -268,6 +345,9 @@ class OnlineController {
   }
   claimFlag() {
     if (this.session?.claimFlag()) this.patchGame({ notice: 'Claiming a win on time…' });
+  }
+  claimAbandonment() {
+    this.session?.claimAbandonment();
   }
   chat(content: Parameters<GameSession['chat']>[0]) {
     return this.session?.chat(content) ?? false;

@@ -24,6 +24,9 @@ import type { GameStart } from './pairing.ts';
 
 export const QUICK_CHAT = ['hi', 'gl', 'hf', 'gg', 'thanks', 'oops', 'wp'] as const;
 export const PING_INTERVAL_MS = 5000;
+/** Silence after which the opponent counts as away, and after which a win may be claimed (§6.9). */
+export const AWAY_AFTER_MS = 15_000;
+export const ABANDON_AFTER_MS = 60_000;
 /** Most credit given for a late ACK of my move (see opponentMove). */
 export const MAX_ACK_CREDIT_MS = 3000;
 const CHAT_LIMIT = { count: 5, windowMs: 10_000 };
@@ -34,6 +37,8 @@ export type GameEnd = {
   aborted?: boolean;
   /** Opponent broke the protocol (illegal move, bad hash...). */
   violation?: string;
+  /** Decided by one side alone (e.g. abandonment): not co-signed (SPECS §6.9, §7.5). */
+  unconfirmed?: boolean;
 };
 
 export type SessionEvent =
@@ -174,6 +179,22 @@ export class GameSession {
     if (this.clocks()[other(this.myColor)] > 0) return false;
     this.flagClaimPending = true;
     this.channel.send({ t: 'FLAG_CLAIM', ply: this.ply });
+    return true;
+  }
+
+  /** Ms since we last heard anything from the opponent. */
+  silenceMs(now = this.timers.now()): number {
+    return now - this.channel.lastHeardAt;
+  }
+
+  get canClaimAbandonment(): boolean {
+    return !this.end && this.silenceMs() >= ABANDON_AFTER_MS;
+  }
+
+  /** Opponent silent for 60 s: claim the win. Recorded as unconfirmed. */
+  claimAbandonment(): boolean {
+    if (!this.canClaimAbandonment) return false;
+    this.finish({ outcome: { winner: this.myColor, reason: 'abandonment' }, unconfirmed: true });
     return true;
   }
 

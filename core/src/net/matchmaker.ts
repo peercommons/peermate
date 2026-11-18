@@ -38,6 +38,8 @@ export type MatchmakerOptions = {
 
 /** A pairing handshake that hasn't finished by now is abandoned (peer vanished). */
 export const PAIRING_TIMEOUT_MS = 15_000;
+/** A lobby peer that hasn't said HELLO by now is dropped (e.g. a stale relay seek). */
+export const HELLO_TIMEOUT_MS = 30_000;
 
 type Hello = Extract<Message, { t: 'HELLO' }>;
 type PeerState = { channel: ReliableChannel; hello: Hello | null; pairing: boolean; attempt: number };
@@ -68,6 +70,12 @@ export class Matchmaker {
     const state: PeerState = { channel, hello: null, pairing: false, attempt: 0 };
     this.peers.set(peer, state);
     channel.onMessage((msg) => this.onLobbyMessage(peer, state, msg));
+    this.timers.setTimeout(() => {
+      if (state.hello || this.peers.get(peer) !== state || this.matched) return;
+      this.log(`${peer.slice(0, 8)}: no hello, dropping`);
+      this.peerLeft(peer);
+      this.opts.network.drop(peer);
+    }, HELLO_TIMEOUT_MS);
     channel.send({
       t: 'HELLO',
       app: APP_ID,

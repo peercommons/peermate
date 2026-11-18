@@ -44,6 +44,8 @@ export class ReliableChannel {
   gid: string | undefined;
   /** Smoothed round-trip time, ms (null until measured). */
   rtt: number | null = null;
+  /** When we last received any valid message from the peer (timers.now()). */
+  lastHeardAt: number;
 
   private readonly key: KeyPair;
   private readonly transmit: (wire: string) => void;
@@ -63,6 +65,7 @@ export class ReliableChannel {
     this.peer = opts.peer;
     this.transmit = opts.send;
     this.timers = opts.timers ?? realTimers;
+    this.lastHeardAt = this.timers.now();
   }
 
   /** Receives reliable messages in order, and PING/PONG-free control flow. */
@@ -106,6 +109,7 @@ export class ReliableChannel {
     if (env.from === this.key.publicKey) return; // our own echo (e.g. a relay)
     if (this.peer === undefined) this.peer = env.from;
     if (env.from !== this.peer) return;
+    this.lastHeardAt = this.timers.now();
 
     const body = env.body;
     switch (body.t) {

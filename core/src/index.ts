@@ -9,3 +9,4 @@ export * from './net/clock.ts';
 export * from './net/pairing.ts';
 export * from './net/session.ts';
 export * from './net/matchmaker.ts';
+export * from './net/router.ts';

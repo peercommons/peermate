@@ -6,6 +6,7 @@ import { Stack, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import {
+  AWAY_AFTER_MS,
   checkedKingSquare,
   describeOutcome,
   isPromotion,
@@ -17,9 +18,11 @@ import {
 import { Board } from '../components/Board';
 import { PromotionPicker } from '../components/PromotionPicker';
 import { formatMoves } from '../game/format';
-import { online, QUICK_TEXT, useOnline } from '../net/online';
+import { online, QUICK_TEXT, useOnline, type Connection } from '../net/online';
 import { useSettings } from '../settings';
 import { BOARD_THEMES, ui } from '../theme';
+
+const BADGE_COLOR: Record<Connection, string> = { direct: '#2e7d32', relayed: '#f9a825', reconnecting: '#c62828' };
 
 const QUICK_ORDER = ['hi', 'gl', 'hf', 'gg', 'thanks', 'wp', 'oops'] as const;
 
@@ -116,6 +119,8 @@ export default function OnlineGameScreen() {
   if (state.end) {
     status = state.end.aborted
       ? 'Game aborted'
+      : state.end.unconfirmed && state.end.outcome
+        ? `${describeOutcome(state.end.outcome)} (opponent left; not confirmed by them)`
       : state.end.violation
         ? `Opponent broke the rules (${state.end.violation}). You win.`
         : state.end.outcome
@@ -125,7 +130,10 @@ export default function OnlineGameScreen() {
     status = 'Connection lost, reconnecting…';
   } else {
     status = myTurn ? 'Your move' : `${state.opponent.nick} is thinking`;
+    if (state.connection === 'relayed') status += ' · via relays';
   }
+  const silent = running ? session.silenceMs() : 0;
+  const away = silent >= AWAY_AFTER_MS;
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
@@ -168,6 +176,17 @@ export default function OnlineGameScreen() {
         {status}
       </Text>
       {state.notice && <Text style={styles.notice}>{state.notice}</Text>}
+      {away && (
+        <Text style={styles.notice}>
+          {state.opponent.nick} hasn't responded for {Math.floor(silent / 1000)} s
+          {session.canClaimAbandonment ? '' : ' (you can claim the win after 60 s)'}
+        </Text>
+      )}
+      {away && session.canClaimAbandonment && (
+        <View style={styles.controls}>
+          <Control label="Claim win" onPress={() => confirm('Claim win', () => online.claimAbandonment())} />
+        </View>
+      )}
 
       {state.drawOffered && !state.end && (
         <View style={styles.controls}>
@@ -255,13 +274,13 @@ function PlayerBar(p: {
   clock: string;
   active: boolean;
   low: boolean;
-  badge?: 'direct' | 'reconnecting';
+  badge?: Connection;
 }) {
   return (
     <View style={styles.playerBar}>
       <View style={{ flex: 1 }}>
         <Text style={styles.playerName} numberOfLines={1}>
-          {p.badge && <Text style={{ color: p.badge === 'direct' ? '#2e7d32' : '#c62828' }}>● </Text>}
+          {p.badge && <Text style={{ color: BADGE_COLOR[p.badge] }}>● </Text>}
           {p.name}
         </Text>
         {p.sub && <Text style={styles.sub}>{p.sub}</Text>}
