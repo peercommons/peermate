@@ -421,6 +421,7 @@ No arbiter exists. Disputed games are marked *disputed* and excluded from both p
 - When both players sign a `RESULT`, either may publish it as a **NIP-64 chess game event (kind 64, PGN content)** with tags carrying both players' Ed25519 signatures and the final hash.
 - A peer's displayed rating can be **spot-checked**: the client fetches the peer's last N kind-64 events from relays, verifies the co-signatures, and recomputes. Mismatch → rating shown as "unverified".
 - Copy in UI: "Ratings are community-calculated and not official."
+- **Status (2026-11-19, build 53): local Glicko-2 is implemented, but not yet tested on phones.** The code is in `core/src/rating.ts`, and its unit test matches Glickman's worked example. There is one rating per time-control class, kept in `app/src/net/ratings.ts`. A new player starts at 1500 with RD 350, and a rating is shown with "?" while RD > 110. HELLO carries `rating`/`rd`, and Quick Match joins the player's 200-point band room plus "any". A game is rated once, by game ID. Games that were aborted or unconfirmed, and games against an opponent that sends no rating, are unrated. NIP-64 publishing and spot-checks are still to do.
 
 ---
 
@@ -689,7 +690,7 @@ Sideloading notes:
 | **0: Spikes (Android)** | 3 wks | (a) RN + Bare Kit + Hyperswarm on real Android devices; (b) hole-punch success field test; (c) Nostr ephemeral-event support across candidate relays; (d) Arasan TurboModule on device: network-file size, CPU/battery use, and `UCI_Elo` behaviour at low levels; (e) R3F/expo-gl 3D perf prototype; (f) Fastlane `android sideload` lane producing a signed APK on a GitHub Release | Go/no-go per spike; fallback plans (WebRTC instead of HyperDHT; Flutter for 2D-only) decided |
 | **1: Offline core** | 4 wks | Rules, 2D board, vs CPU (10 levels), pass & play, PGN, history, settings, analysis | Levels strictly ordered by self-play calibration (done); human-Elo anchoring moves to beta |
 | **2: Online MVP** (**done** 2026-11-18: protocol core, Hyperswarm play, relay fallback, iOS checkpoint, 100-game soak at 0% failed, block/report) | 6 wks | Identity/backup, Hyperswarm lobby + Nostr fallback, protocol, clocks, reconnect, in-game quick-chat, block/report. **iOS checkpoint:** run spike (a) and a full online game on a real iPhone, including backgrounding behaviour | 100 internal games across networks, < 2% failed games; iOS checkpoint passed |
-| **3: Social** (in progress: friends, challenges, presence and messages done; ratings remaining) | 3 wks | Friends, presence, NIP-17 DMs, challenges, ratings + NIP-64 publishing | n/a |
+| **3: Social** (in progress: friends, challenges, presence, messages, notifications and local ratings done; NIP-64 publishing, QR codes, offline challenges and the NIP-51 mute list remaining) | 3 wks | Friends, presence, NIP-17 DMs, challenges, ratings + NIP-64 publishing | n/a |
 | **4: Store readiness** | 2 wks | Developer accounts (start the Play 12-tester / 14-day closed test early), Fastlane `ios` lanes + `match`, store name, metadata, screenshots automation, privacy policy, UGC compliance, accessibility pass, public beta (TestFlight external + Play open testing) | Passes App Review + Play review |
 | **5: v1.1** | 4 wks | 3D board, correspondence games, adaptive CPU, more themes | n/a |
 

@@ -934,12 +934,14 @@ class OnlineController {
 
   /**
    * Updates our rating for a finished game. Aborted games and one-sided
-   * results (opponent vanished, unconfirmed) don't count.
+   * results (opponent vanished, unconfirmed) don't count, and neither do
+   * opponents that send no rating (the desktop bot, older builds).
    */
   private rate(end: GameEnd): { before: number; after: number; shown: string } | null {
     const s = this.session;
     const m = this.match;
     if (!s || !m || this.state.phase !== 'game' || end.aborted || end.unconfirmed || !end.outcome) return null;
+    if (m.opponent.rating === undefined) return null;
     const w = end.outcome.winner;
     const score = w === null ? 0.5 : w === s.myColor ? 1 : 0;
     const cls = timeControlClass(this.state.tc);
