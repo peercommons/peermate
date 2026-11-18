@@ -12,7 +12,12 @@ export type EndReason =
   | 'threefold-repetition'
   | 'fifty-move-rule'
   | 'insufficient-material'
-  | 'resignation';
+  | 'resignation'
+  // Online play (SPECS §6–7):
+  | 'agreement'
+  | 'timeout'
+  | 'timeout-vs-insufficient-material' // flag fell, but the opponent can't mate: draw
+  | 'abandonment';
 
 export type Outcome = { winner: Color | null; reason: EndReason };
 
@@ -53,6 +58,10 @@ export function describeOutcome(o: Outcome): string {
     'fifty-move-rule': 'the 50-move rule',
     'insufficient-material': 'insufficient material',
     resignation: 'resignation',
+    agreement: 'agreement',
+    timeout: 'timeout',
+    'timeout-vs-insufficient-material': 'timeout vs insufficient material',
+    abandonment: 'abandonment',
   };
   if (o.winner === null) return `Draw by ${reasons[o.reason]}`;
   return `${o.winner === 'w' ? 'White' : 'Black'} wins by ${reasons[o.reason]}`;

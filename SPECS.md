@@ -284,7 +284,8 @@ seed (32 bytes, CSPRNG) ──► BIP-39 24-word backup phrase (shown once, opti
 ```
 - Seed stored in **iOS Keychain** (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) / **Android Keystore**-wrapped (via `expo-secure-store`).
 - **Binding proof:** the Nostr profile (kind 0) includes the Ed25519 PeerKey, signed by the Ed25519 key over the npub, so peers can verify both keys belong to the same player.
-- Display identity: nickname + 4-word fingerprint derived from the npub (protects against impersonation by nickname).
+- Display identity: nickname + 4-word fingerprint (44 bits, BIP-39 words) of the Ed25519 PeerKey, the key that signs every game message (protects against impersonation by nickname).
+- **Implemented** in `core/src/net/identity.ts`: the seed is the BIP-39 entropy, so the 24-word phrase *is* the seed; keys via HKDF-SHA256; `@noble/curves`, `@noble/hashes`, `@scure/bip39` (MIT, audited).
 - Restore on new device: enter backup phrase → same keys → profile, contacts, mute list re-fetched from Nostr.
 - (Advanced) Import an existing Nostr `nsec` instead of deriving one.
 
@@ -327,16 +328,18 @@ background: keep retrying direct every 30 s; migrate session to direct if it lat
 - Measured round trip (ping → pong through relays): ~590 ms desktop↔desktop, ~860 ms emulator↔desktop. Discovery via `hello`: ~1–2.5 s.
 
 ### 6.7 Wire protocol
-- **Encoding:** CBOR (compact) on P2P streams; base64-CBOR inside NIP-44-encrypted Nostr event content.
+- **Encoding:** JSON in v1 (a signed move is ~400 bytes; JSON is debuggable and Nostr content is text). Signatures cover a **canonical** form (sorted keys), so CBOR can replace JSON later without changing what is signed. Inside Nostr events the JSON is NIP-44 encrypted.
+- **Implemented** in `core/src/net/` (`envelope.ts`, `channel.ts`, `pairing.ts`, `session.ts`, `clock.ts`), with tests that play whole games over a simulated link losing, duplicating and reordering messages.
 - **Envelope:**
 ```ts
 type Envelope = {
   v: 1;                        // protocol version
   gid?: string;                // game id (UUIDv7), absent for lobby/chat-only msgs
-  seq: number;                 // per-sender monotonic, for dedupe + ordering across transport migration
-  ts: number;                  // sender wall-clock ms
+  seq: number;                 // per-sender 1,2,3… for reliable messages; 0 for ACK/SYNC/PING/PONG
+  ts: number;                  // sender wall-clock ms (informational)
+  from: string;                // sender Ed25519 key, hex
   body: Message;
-  sig: Uint8Array;             // Ed25519 over (v,gid,seq,ts,body)
+  sig: string;                 // Ed25519 over canonical(v,gid,seq,ts,from,body), hex
 };
 ```
 - **Messages:**
@@ -349,11 +352,13 @@ type Envelope = {
 | `ACCEPT` / `DECLINE` | reveal / reason | |
 | `START` | gid, white, black, tc, initialFEN | Signed by both (two-step) |
 | `MOVE` | ply, uci, fenAfterHash, clockMs, prevHash | Hash-chained (§7.2) |
-| `ACK` | ply | Enables retransmit |
+| `REVEAL` | nonce | §6.8 step 3 |
+| `ACK` | seq | Acks any reliable message; unacked messages are retransmitted (backoff 0.6 s doubling to 8 s), duplicates re-acked, early arrivals buffered and delivered in order |
+| `SYNC` | delivered | After a reconnect or transport switch: peer resends everything unacked |
 | `DRAW_OFFER` / `DRAW_RESP` | ply, accept | |
 | `TAKEBACK_REQ` / `TAKEBACK_RESP` | toPly, accept | |
 | `RESIGN` / `ABORT` | ply | |
-| `FLAG_CLAIM` | ply, opponentClockMs | §7.3 |
+| `FLAG_CLAIM` / `FLAG_RESP` | ply / accept | §7.3 |
 | `RESULT` | result, reason, finalHash, pgnHash | Co-signed (§7.5) |
 | `CHAT` | text (≤ 280 chars) or `quickId` | |
 | `PING` / `PONG` | nonce | RTT for clock compensation |
@@ -393,11 +398,15 @@ type Envelope = {
 `h_n = BLAKE2b(h_{n-1} ‖ ply ‖ uci ‖ fenAfter ‖ clockMs)`, with `h_0 = H(START)`. Each `MOVE` is signed by its author. A complete game is a self-verifying transcript any third party can check.
 
 ### 7.3 Clocks
+- **Clocks start once both sides have moved;** until then either side may `ABORT` (no result).
 - Each client is authoritative for **displaying** both clocks, but timing disputes are resolved conservatively:
   - The mover reports its remaining time in `MOVE.clockMs`.
   - The receiver computes `elapsed_observed = recvTime(move_n) − sendTime(move_{n-1}) − RTT_est/2`.
-  - If the reported time exceeds the receiver's computed time by > `max(500 ms, RTT_est)`, the receiver uses its own computation and logs a discrepancy. Three discrepancies → warn the user.
-- **Flagging:** a player claims a flag with `FLAG_CLAIM`; the opponent's client accepts if its own clock view agrees within tolerance, otherwise the game continues and the dispute is logged.
+  - If the reported time exceeds the receiver's computed time by > `max(500 ms, RTT_est)` + **2.5 s delivery allowance**, the receiver uses its own computation and logs a discrepancy. Three discrepancies → warn the user.
+  - *As implemented:* the check compares **time used on the move** (the drop since the opponent's previous report), not absolute clocks. Comparing absolute clocks made one overrule cascade into overruling every later move. The opponent's turn is timed from when my move reached them (my move's ACK minus RTT/2, credit capped at 3 s), so retransmissions on my side don't count against them.
+  - **Measured** (30 random 60-ply games per setting, simulated): honest clocks are overruled on < 1% of moves at 20% message loss. At 40% loss it's 11% (the slowest moves arrive later than the allowance), but games stay in sync. The allowance is also the most a dishonest client can gain unnoticed per move.
+- **Flagging:** a player claims a flag with `FLAG_CLAIM`; the opponent's client answers `FLAG_RESP` and accepts if its own clock view is within `max(500 ms, RTT)` of zero, otherwise the game continues and the dispute is logged. A flag against a side that can't mate (lone king, or king + one minor) is a draw.
+- **Draw offers** are only sent on the opponent's turn, so an offer can't cross a move in flight; moving declines a pending offer.
 - Latency compensation: up to `RTT_est/2` (capped at 1 s) is credited back to the mover each move (similar to "lag compensation" on major chess sites).
 
 ### 7.4 Disputes
@@ -652,7 +661,7 @@ Sideloading notes:
 |---|---|---|---|
 | **0: Spikes (Android)** | 3 wks | (a) RN + Bare Kit + Hyperswarm on real Android devices; (b) hole-punch success field test; (c) Nostr ephemeral-event support across candidate relays; (d) Arasan TurboModule on device: network-file size, CPU/battery use, and `UCI_Elo` behaviour at low levels; (e) R3F/expo-gl 3D perf prototype; (f) Fastlane `android sideload` lane producing a signed APK on a GitHub Release | Go/no-go per spike; fallback plans (WebRTC instead of HyperDHT; Flutter for 2D-only) decided |
 | **1: Offline core** | 4 wks | Rules, 2D board, vs CPU (10 levels), pass & play, PGN, history, settings, analysis | Levels strictly ordered by self-play calibration (done); human-Elo anchoring moves to beta |
-| **2: Online MVP** | 6 wks | Identity/backup, Hyperswarm lobby + Nostr fallback, protocol, clocks, reconnect, in-game quick-chat, block/report. **iOS checkpoint:** run spike (a) and a full online game on a real iPhone, including backgrounding behaviour | 100 internal games across networks, < 2% failed games; iOS checkpoint passed |
+| **2: Online MVP** (in progress; slice 1, the protocol core, is done) | 6 wks | Identity/backup, Hyperswarm lobby + Nostr fallback, protocol, clocks, reconnect, in-game quick-chat, block/report. **iOS checkpoint:** run spike (a) and a full online game on a real iPhone, including backgrounding behaviour | 100 internal games across networks, < 2% failed games; iOS checkpoint passed |
 | **3: Social** | 3 wks | Friends, presence, NIP-17 DMs, challenges, ratings + NIP-64 publishing | n/a |
 | **4: Store readiness** | 2 wks | Developer accounts (start the Play 12-tester / 14-day closed test early), Fastlane `ios` lanes + `match`, store name, metadata, screenshots automation, privacy policy, UGC compliance, accessibility pass, public beta (TestFlight external + Play open testing) | Passes App Review + Play review |
 | **5: v1.1** | 4 wks | 3D board, correspondence games, adaptive CPU, more themes | n/a |
