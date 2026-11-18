@@ -13,6 +13,8 @@
 import { SimplePool } from 'nostr-tools/pool';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import * as nip44 from 'nostr-tools/nip44';
+import * as nip17 from 'nostr-tools/nip17';
+import * as nip59 from 'nostr-tools/nip59';
 
 /** Provisional app-specific ephemeral kind (SPECS §16 Q2). */
 export const PEERMATE_KIND = 25050;
@@ -56,12 +58,17 @@ const PRESENCE = new Set<string>(['online', 'playing', 'away']);
 
 const roomTag = (room: string) => `peermate-v1-${room}`;
 
+/** The id the recipient will see for our message (the rumor's event id). */
+function rumorId(sk: Uint8Array, npub: string, text: string, createdAt: number): string {
+  const rumor = nip59.createRumor({ kind: 14, content: text, tags: [['p', npub]], created_at: createdAt }, sk);
+  return rumor.id;
+}
+
 export class RelayNet {
   readonly npub: string;
   private readonly sk: Uint8Array;
   private readonly relays: string[];
-  // Ping idle connections and reconnect dropped ones (subscriptions included).
-  private readonly pool = new SimplePool({ enablePing: true, enableReconnect: true });
+  private readonly pool: SimplePool;
   private readonly seen = new Set<string>();
   private readonly keys = new Map<string, Uint8Array>();
   private readonly opts: RelayOptions;
@@ -74,6 +81,11 @@ export class RelayNet {
     this.opts = opts;
     this.sk = opts.nostrSecret;
     this.npub = getPublicKey(this.sk);
+    // Ping idle connections and reconnect dropped ones (subscriptions included).
+    // Answer AUTH challenges (NIP-42): relays release stored private messages
+    // (kind 1059) only to their authenticated recipient.
+    this.pool = new SimplePool({ enablePing: true, enableReconnect: true });
+    this.pool.automaticallyAuth = () => async (event) => finalizeEvent(event, this.sk);
     this.relays = opts.relays ?? DEFAULT_RELAYS;
     this.inbox = this.resilient(
       'inbox',
@@ -93,7 +105,9 @@ export class RelayNet {
   private resilient(
     name: string,
     filter: () => Record<string, unknown>,
-    onevent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
+    onevent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number; kind: number; sig: string }) => void,
+    /** Watch for our own events echoing back (subscriptions that see some of ours). */
+    health = true,
   ): { close(): void } {
     let stopped = false;
     let delay = RESUBSCRIBE_MIN_MS;
@@ -102,8 +116,8 @@ export class RelayNet {
     let generation = 0; // which open() is current; an older subscription's close is ignored
     // Our own events (inbox probes, our seeks) come back on a live subscription.
     let lastOwn = Date.now();
-    const health = setInterval(() => {
-      if (stopped || this.closed || Date.now() - lastOwn < STALE_SUBSCRIPTION_MS) return;
+    const healthTimer = setInterval(() => {
+      if (!health || stopped || this.closed || Date.now() - lastOwn < STALE_SUBSCRIPTION_MS) return;
       this.opts.onLog?.(`relay ${name} subscription deaf for ${Math.round((Date.now() - lastOwn) / 1000)} s; reconnecting`);
       lastOwn = Date.now();
       const old = sub;
@@ -137,7 +151,7 @@ export class RelayNet {
     return {
       close: () => {
         stopped = true;
-        clearInterval(health);
+        clearInterval(healthTimer);
         if (timer) clearTimeout(timer);
         sub?.close();
       },
@@ -185,6 +199,47 @@ export class RelayNet {
       return;
     }
     this.opts.onMessage(e.pubkey, wire);
+  }
+
+  /** The id our private message will have (the same on a retry with the same `createdAt`). */
+  dmId(npub: string, text: string, createdAt: number): string {
+    return rumorId(this.sk, npub, text, createdAt);
+  }
+
+  /**
+   * Sends a private message (NIP-17: a kind-14 rumor, sealed and gift-wrapped,
+   * stored by relays). Resolves with the message id once at least one relay took it.
+   */
+  async sendDM(npub: string, text: string, createdAt = Math.floor(Date.now() / 1000)): Promise<{ id: string; ok: boolean }> {
+    const wrap = nip17.wrapEvent(this.sk, { publicKey: npub }, text, undefined, undefined, createdAt);
+    const id = rumorId(this.sk, npub, text, createdAt);
+    if (this.closed) return { id, ok: false };
+    const results = await Promise.allSettled(this.pool.publish(this.relays, wrap));
+    return { id, ok: results.some((r) => r.status === 'fulfilled') };
+  }
+
+  /**
+   * Private messages to us since `sinceS` (unix seconds). Gift wraps carry a
+   * randomised timestamp up to 2 days in the past (NIP-59), hence the margin.
+   */
+  receiveDMs(sinceS: number, onDM: (dm: { id: string; from: string; text: string; at: number }) => void): { close(): void } {
+    const seen = new Set<string>();
+    return this.resilient(
+      'messages',
+      () => ({ kinds: [1059], '#p': [this.npub], since: sinceS - 2 * 24 * 3600 - 600 }),
+      (e) => {
+        let rumor: { id: string; pubkey: string; kind: number; content: string; created_at: number };
+        try {
+          rumor = nip17.unwrapEvent(e as never, this.sk) as never;
+        } catch {
+          return; // not for us, forged, or garbage
+        }
+        if (rumor.kind !== 14 || seen.has(rumor.id) || typeof rumor.content !== 'string') return;
+        seen.add(rumor.id);
+        onDM({ id: rumor.id, from: rumor.pubkey, text: rumor.content, at: rumor.created_at * 1000 });
+      },
+      false, // stored events, none of them ours: no echo to watch for
+    );
   }
 
   /** Tells one friend we're around (encrypted to them; relays see only that we sent something). */

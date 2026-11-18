@@ -8,11 +8,13 @@ import { formatDate } from '../game/format';
 import { ui } from '../theme';
 import { engineAvailable, ENGINE_UNAVAILABLE } from '../engine/arasan';
 import { useOnline } from '../net/online';
+import { useUnread } from '../net/messages';
 
 type ColorChoice = 'w' | 'b' | 'random';
 
 export default function Home() {
   const [level, setLevel] = useState(3);
+  const unreadTotal = Object.values(useUnread()).reduce((a, b) => a + b, 0);
   const [color, setColor] = useState<ColorChoice>('w');
   const [unfinished, setUnfinished] = useState<GameRecord | null>(null);
 
@@ -102,7 +104,7 @@ export default function Home() {
           Your games
         </Link>
         <Link href="/friends" style={styles.link}>
-          Friends
+          {unreadTotal ? `Friends (${unreadTotal} new)` : 'Friends'}
         </Link>
         <Link href="/settings" style={styles.link}>
           Settings

@@ -34,6 +34,7 @@ import {
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
 import { block, isBlocked } from './blocklist';
+import { addMessage, MESSAGE_MAX, setStatus, syncedTo } from './messages';
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
 import { RelayNet, type PresenceStatus, type Seek } from './relay';
@@ -154,6 +155,7 @@ class OnlineController {
   presence: ReadonlyMap<string, Presence> = new Map();
   private toldAt = new Map<string, number>();
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
+  private dms: { close(): void } | null = null;
   /** When the current direct link to the opponent came up (grace period for the stale check). */
   private directSince = 0;
 
@@ -499,13 +501,42 @@ class OnlineController {
     if (this.relay && this.worker) return this.announce(); // e.g. a friend was just added
     try {
       const [me, worker] = await Promise.all([loadMe(), getWorker()]);
-      this.openTransports(me, worker);
+      const { relay } = this.openTransports(me, worker);
       log('listening for friends');
+      this.dms ??= relay.receiveDMs(syncedTo(), (dm) => this.onDM(dm));
       this.presenceTimer ??= setInterval(() => this.announce(), PRESENCE_EVERY_MS);
       this.announce();
     } catch (err) {
       log('listen failed:', String(err));
     }
+  }
+
+  /** A private message (NIP-17). Only friends' are kept; anyone else's is dropped. */
+  private onDM(dm: { id: string; from: string; text: string; at: number }) {
+    const f = friendByNpub(dm.from);
+    if (!f || isBlocked(f.key)) return;
+    addMessage(f.key, { id: dm.id, from: 'them', text: dm.text.slice(0, MESSAGE_MAX), at: dm.at });
+  }
+
+  /**
+   * Sends a friend a private message; it reaches them even if their app is
+   * closed. `retry` resends a failed one (same time, so the same id).
+   */
+  async sendMessage(friendKey: string, text: string, retry?: { at: number }): Promise<void> {
+    const f = getFriend(friendKey);
+    const body = text.trim().slice(0, MESSAGE_MAX);
+    if (!f || !body) return;
+    await this.listen();
+    const relay = this.relay;
+    const at = retry?.at ?? Date.now();
+    const createdAt = Math.floor(at / 1000);
+    if (!relay) return;
+    const id = relay.dmId(f.npub, body, createdAt);
+    if (retry) setStatus(f.key, id, 'sending');
+    else addMessage(f.key, { id, from: 'me', text: body, at, status: 'sending' });
+    const { ok } = await relay.sendDM(f.npub, body, createdAt);
+    setStatus(f.key, id, ok ? 'sent' : 'failed');
+    log('message to', f.nick, ok ? 'sent' : 'failed');
   }
 
   private myStatus(): PresenceStatus {

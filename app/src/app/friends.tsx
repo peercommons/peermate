@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View 
 import { router } from 'expo-router';
 import { addFriend, friendLink, parseFriendLink, removeFriend, useFriends, type Friend } from '../net/friends';
 import { online, presenceOf, TIME_CONTROLS, usePresence } from '../net/online';
+import { useUnread } from '../net/messages';
 import { loadMe, type Me } from '../net/profile';
 import { ui } from '../theme';
 
@@ -17,6 +18,7 @@ const STATUS = {
 export default function FriendsScreen() {
   const list = useFriends();
   const presence = usePresence();
+  const unread = useUnread();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15_000); // let stale presence go offline
@@ -91,15 +93,22 @@ export default function FriendsScreen() {
       {list.map((f) => (
         <View key={f.key} style={styles.card}>
           <View style={styles.row}>
-            <View style={{ flex: 1 }}>
+            <Pressable
+              style={{ flex: 1 }}
+              onPress={() => router.push({ pathname: '/chat/[key]', params: { key: f.key } })}
+              accessibilityRole="button"
+              accessibilityLabel={`Messages with ${f.nick}${unread[f.key] ? `, ${unread[f.key]} unread` : ''}`}
+            >
               <Text style={styles.name} numberOfLines={1}>
                 {f.nick}
+                {unread[f.key] ? <Text style={styles.unread}>  {unread[f.key]} new</Text> : null}
               </Text>
               <Text style={styles.subtle}>
                 <Text style={{ color: STATUS[presenceOf(presence.get(f.key), now)].color }}>● </Text>
                 {STATUS[presenceOf(presence.get(f.key), now)].label} · ID {f.fingerprint}
               </Text>
-            </View>
+              <Text style={styles.tapHint}>Tap for messages</Text>
+            </Pressable>
             <Pressable
               onPress={() => setOpen(open === f.key ? null : f.key)}
               style={({ pressed }) => [styles.small, pressed && { opacity: 0.7 }]}
@@ -182,4 +191,6 @@ const styles = StyleSheet.create({
   },
   chipText: { color: ui.text, fontWeight: '600' },
   remove: { color: '#b3261e', paddingVertical: 4 },
+  unread: { color: '#b3261e', fontSize: 13, fontWeight: '700' },
+  tapHint: { color: ui.accent, fontSize: 12, marginTop: 2 },
 });

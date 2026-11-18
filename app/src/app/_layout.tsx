@@ -56,6 +56,7 @@ export default function RootLayout() {
         <Stack.Screen name="dev" options={{ title: 'Dev tools' }} />
         <Stack.Screen name="friends" options={{ title: 'Friends' }} />
         <Stack.Screen name="p/[key]" options={{ title: 'Friend link' }} />
+        <Stack.Screen name="chat/[key]" options={{ title: 'Messages' }} />
       </Stack>
     </SettingsProvider>
   );
