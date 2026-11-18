@@ -40,6 +40,14 @@ cd ../core && npm install && npm test   # install core before building the app: 
 
 For a real NAT test, put the phone on **mobile data** (not your Wi-Fi), or use two phones on different networks.
 
+### Online field tests
+
+```sh
+cd app && npm run play-peer -- 5+0   # a desktop bot that seeks 5+0 (add --relay-only to skip Hyperswarm)
+adb logcat -s ReactNativeJS | grep '\[online\]'   # Android: connection lifecycle
+tools/ios-log.sh 30                  # iPhone over USB: the same lines from the last 30 min (needs pymobiledevice3)
+```
+
 ### Calibrate the CPU levels
 
 Plays the levels against each other and against Stockfish at fixed `UCI_Elo` anchors, then fits a rating per level (SPECS §12.3). Takes about an hour on an M-series Mac.

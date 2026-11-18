@@ -9,6 +9,7 @@
 // Hyperswarm keeps redialing a matched opponent, so a relayed game moves to a
 // direct connection whenever one succeeds.
 import { useSyncExternalStore } from 'react';
+import { appLog } from '../../modules/peermate-log';
 import Storage from 'expo-sqlite/kv-store';
 import {
   decode,
@@ -57,8 +58,8 @@ export type OnlineState =
     }
   | { phase: 'error'; message: string };
 
-/** Lifecycle log, readable over USB with `adb logcat -s ReactNativeJS` (field testing). */
-const log = (...args: unknown[]) => console.info('[online]', ...args);
+/** Lifecycle log for field testing (logcat on Android, the unified log on iOS). */
+const log = (...args: unknown[]) => appLog('online', ...args);
 
 /** A running online game, saved as it's played so it survives an app restart. */
 const ACTIVE_KEY = 'online.active.v1';
