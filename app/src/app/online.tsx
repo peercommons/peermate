@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, router, useFocusEffect } from 'expo-router';
+import { timeControlClass } from '@peermate/core';
 import { online, TIME_CONTROLS, useOnline } from '../net/online';
 import { loadMe, type Me } from '../net/profile';
 import { ui } from '../theme';
@@ -66,6 +67,12 @@ export default function OnlineLobby() {
               </Pressable>
             ))}
           </View>
+          {timeControlClass(tc) === 'bullet' && (
+            <Text style={styles.subtle}>
+              Bullet plays best on a direct connection. If the game has to go through relays, each move takes 1–3 s to
+              arrive.
+            </Text>
+          )}
 
           {seeking ? (
             <View style={styles.seeking}>

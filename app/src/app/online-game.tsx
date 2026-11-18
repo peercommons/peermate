@@ -11,6 +11,7 @@ import {
   describeOutcome,
   isPromotion,
   legalTargets,
+  timeControlClass,
   type Color,
   type PieceSymbol,
   type Square,
@@ -18,7 +19,7 @@ import {
 import { Board } from '../components/Board';
 import { PromotionPicker } from '../components/PromotionPicker';
 import { formatMoves } from '../game/format';
-import { online, QUICK_TEXT, useOnline, type Connection } from '../net/online';
+import { online, QUICK_TEXT, RELAYED_BULLET_WARNING, useOnline, type Connection } from '../net/online';
 import { useSettings } from '../settings';
 import { BOARD_THEMES, ui } from '../theme';
 
@@ -176,6 +177,9 @@ export default function OnlineGameScreen() {
         {status}
       </Text>
       {state.notice && <Text style={styles.notice}>{state.notice}</Text>}
+      {!state.end && state.connection === 'relayed' && timeControlClass(state.tc) === 'bullet' && (
+        <Text style={styles.subtle}>{RELAYED_BULLET_WARNING}</Text>
+      )}
       {away && (
         <Text style={styles.notice}>
           {state.opponent.nick} hasn't responded for {Math.floor(silent / 1000)} s
@@ -329,6 +333,7 @@ const styles = StyleSheet.create({
   status: { fontSize: 16, textAlign: 'center', color: ui.text },
   final: { fontWeight: '700', color: ui.accent },
   notice: { textAlign: 'center', color: ui.mistake, fontWeight: '600' },
+  subtle: { textAlign: 'center', color: ui.subtle, paddingHorizontal: 8 },
   panel: { flex: 1, backgroundColor: ui.card, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: ui.border },
   panelContent: { padding: 10, gap: 4 },
   moves: { fontSize: 14, lineHeight: 22, color: ui.text },

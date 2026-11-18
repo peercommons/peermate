@@ -61,6 +61,8 @@
 Bullet 1+0, 2+1 · Blitz 3+0, 3+2, 5+0, 5+3 · Rapid 10+0, 10+5, 15+10 · Classical 30+0, 30+20 · Custom · Correspondence (1/3/7 days per move, v1.1).
 
 > Bullet over the Nostr fallback transport will feel laggy (100–800 ms per hop). The client warns when a bullet game is running on fallback transport, and Quick Match for bullet prefers peers with a direct connection (§6.6).
+>
+> **Status (2026-11-18):** Quick Match offers 1+0, 2+1, 3+2, 5+0, 10+0 and 15+10. Field tests measured 1–3 s per relayed move. The lobby notes that bullet plays best direct, and the game screen warns while a bullet game is on the relays. **Not done yet:** preferring direct peers in bullet Quick Match.
 
 ### 2.3 Chess rules
 - Full FIDE rules: castling, en passant, promotion (with picker), check/checkmate/stalemate.

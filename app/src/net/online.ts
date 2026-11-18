@@ -34,7 +34,11 @@ import { loadMe, type Me } from './profile';
 import { RelayNet, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
 
-export const TIME_CONTROLS = ['3+2', '5+0', '10+0', '15+10'] as const;
+export const TIME_CONTROLS = ['1+0', '2+1', '3+2', '5+0', '10+0', '15+10'] as const;
+
+/** Shown when a bullet game runs through the relays, where each move takes 1–3 s to arrive (SPECS §1). */
+export const RELAYED_BULLET_WARNING =
+  'Playing through relays: each move takes 1–3 s to arrive. The clocks make up for part of the delay, but bullet will feel slow.';
 
 export type ChatLine = { from: 'me' | 'opponent'; text: string; at: number };
 export type Connection = 'direct' | 'relayed' | 'reconnecting';
