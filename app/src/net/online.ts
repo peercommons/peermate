@@ -93,6 +93,7 @@ class OnlineController {
   private relay: RelayNet | null = null;
   private router: PeerRouter | null = null;
   private startedAt = 0;
+  private resuming: Promise<boolean> | null = null;
 
   get gameId(): string | null {
     return this.match?.game.start.gid ?? null;
@@ -116,6 +117,8 @@ class OnlineController {
 
   async seek(tc: string): Promise<void> {
     log('seek', tc, 'from state', this.state.phase);
+    // A saved game is being picked up (app just started): it wins over a new seek.
+    if (this.resuming && (await this.resuming)) return;
     if (this.state.phase === 'starting' || this.state.phase === 'seeking') return;
     if (this.state.phase === 'game' && !this.state.end) return;
     this.leave();
@@ -165,8 +168,7 @@ class OnlineController {
     if (this.state.phase !== 'idle') this.set({ phase: 'idle' });
   }
 
-  private openTransports(me: Me, worker: P2PWorker) {
-    this.worker = worker;
+  private openTransports(me: Me, worker: P2PWorker | null) {
     const relay = new RelayNet({
       nostrSecret: me.identity.nostr.secretKey,
       peerKey: me.identity.peer.publicKey,
@@ -174,14 +176,20 @@ class OnlineController {
       onSeek: (seek) => this.onRelaySeek(seek),
     });
     const router = new PeerRouter({
-      directSend: (peer, data) => worker.send({ type: 'send', peer, data }),
-      directDrop: (peer) => worker.send({ type: 'drop', peer }),
+      directSend: (peer, data) => this.worker?.send({ type: 'send', peer, data }),
+      directDrop: (peer) => this.worker?.send({ type: 'drop', peer }),
       relaySend: (npub, wire) => relay.send(npub, wire),
     });
     this.relay = relay;
     this.router = router;
-    this.unsubscribe = worker.on((e) => this.onWorkerEvent(e));
+    if (worker) this.attachWorker(worker);
     return { relay, router };
+  }
+
+  private attachWorker(worker: P2PWorker) {
+    this.worker = worker;
+    this.unsubscribe?.();
+    this.unsubscribe = worker.on((e) => this.onWorkerEvent(e));
   }
 
   /** Feeds a message from `peer` to the running game or the matchmaker. */
@@ -233,7 +241,12 @@ class OnlineController {
    * Picks up a game that was running when the app last closed. Clocks kept
    * running meanwhile; the opponent replays anything we missed.
    */
-  async resumeSaved(): Promise<boolean> {
+  resumeSaved(): Promise<boolean> {
+    this.resuming ??= this.doResume().finally(() => (this.resuming = null));
+    return this.resuming;
+  }
+
+  private async doResume(): Promise<boolean> {
     log('resume: state', this.state.phase);
     if (this.state.phase !== 'idle') return this.state.phase === 'game';
     let saved: SavedGame;
@@ -242,19 +255,28 @@ class OnlineController {
       if (!raw) return false;
       saved = JSON.parse(raw) as SavedGame;
       if (saved.v !== 1) throw new Error('old format');
-    } catch {
+    } catch (err) {
+      log('resume: unreadable save', String(err));
       this.clearSaved();
       return false;
     }
     try {
-      const [me, worker] = await Promise.all([loadMe(), getWorker()]);
-      if (this.state.phase !== 'idle') return false;
+      // Only the identity is awaited here. The P2P worker can take many seconds
+      // to start on a phone; the game resumes over the relays meanwhile and goes
+      // direct once the worker is up.
+      const me = await loadMe();
+      const now = (this.state as OnlineState).phase;
+      if (now !== 'idle') {
+        log('resume: skipped, state', now);
+        return false;
+      }
       const start = saved.session.game.start;
       if (start.white !== me.identity.peer.publicKey && start.black !== me.identity.peer.publicKey) {
+        log('resume: saved under another identity');
         this.clearSaved(); // saved under another identity (restored from a phrase)
         return false;
       }
-      const { router } = this.openTransports(me, worker);
+      const { router } = this.openTransports(me, null);
       const opp = saved.opponent;
       if (opp.npub) router.relayKnown(opp.key, opp.npub);
       const channel = ReliableChannel.restore(
@@ -278,9 +300,17 @@ class OnlineController {
         chat: [],
         version: 0,
       });
-      worker.send({ type: 'connect', peer: opp.key }); // try for a direct link
       channel.resync();
       log('resumed vs', opp.nick, 'at ply', this.session.ply, 'relay', Boolean(opp.npub));
+      getWorker().then(
+        (worker) => {
+          if (this.match?.channel !== channel) return; // game left meanwhile
+          this.attachWorker(worker);
+          worker.send({ type: 'connect', peer: opp.key }); // try for a direct link
+          log('resume: worker up');
+        },
+        (err) => log('resume: no P2P worker, relays only:', String(err)),
+      );
       return true;
     } catch (err) {
       log('resume failed:', String(err));
