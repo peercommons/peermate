@@ -21,3 +21,6 @@ fastlane/test_output/
 vendor/bundle/
 .bundle/
 native/build/
+
+# Soak test output (app/tools/soak.mjs)
+app/soak-results/

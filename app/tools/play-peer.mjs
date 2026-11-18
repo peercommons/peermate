@@ -3,10 +3,14 @@
 // with whoever wants the same time control, and plays random legal moves
 // (captures first) after a short think.
 //
-//   npm run play-peer -- [timeControl] [--relay-only]
+//   npm run play-peer -- [timeControl] [--relay-only] [--room NAME] [--think MS] [--max-plies N]
 //
 // --relay-only skips Hyperswarm entirely, to test the relay fallback as if
-// hole-punching had failed. Ctrl-C quits (aborts or resigns a running game).
+// hole-punching had failed. --room seeks in a private room instead of the public
+// lobby (the soak test runs each game in its own). --think sets the average think
+// time; --max-plies offers a draw (which the opponent bot accepts) after that
+// many plies. When the game ends it prints one `RESULT {json}` line and exits.
+// Ctrl-C quits (aborts or resigns a running game).
 import { useWebSocketImplementation } from 'nostr-tools/pool'
 import { NodeWebSocket } from './ws.mjs'
 import { startHost } from './host.mjs'
@@ -27,12 +31,20 @@ import {
 useWebSocketImplementation(NodeWebSocket)
 
 const args = process.argv.slice(2)
+const option = (name) => {
+  const i = args.indexOf(name)
+  return i >= 0 ? args[i + 1] : undefined
+}
 const relayOnly = args.includes('--relay-only')
-const tc = args.find((a) => !a.startsWith('--')) ?? '5+0'
+const room = option('--room')
+const thinkMs = Number(option('--think') ?? 2000)
+const maxPlies = Number(option('--max-plies') ?? Infinity)
+const valued = new Set(['--room', '--think', '--max-plies'].flatMap((n) => [option(n)]))
+const tc = args.find((a) => !a.startsWith('--') && !valued.has(a)) ?? '5+0'
 const identity = deriveIdentity(newSeed())
 const nick = relayOnly ? 'Relay bot' : 'Desktop bot'
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
-const rooms = [lobbyRoom(timeControlClass(tc), 'any')]
+const rooms = [room ?? lobbyRoom(timeControlClass(tc), 'any')]
 
 let session = null
 let match = null
@@ -66,8 +78,11 @@ const router = new PeerRouter({
   relaySend: (npub, wire) => relay.send(npub, wire)
 })
 
+let routeSwitches = 0
 function routeNote() {
-  if (match) log(`opponent route: ${router.route(match.opponent.key) ?? 'none'}`)
+  if (!match) return
+  routeSwitches++
+  log(`opponent route: ${router.route(match.opponent.key) ?? 'none'}`)
 }
 
 if (!relayOnly) {
@@ -170,12 +185,17 @@ function onEvent(e) {
       break
     case 'ended':
       log('game over:', JSON.stringify(e.end))
+      console.log(
+        'RESULT ' +
+          JSON.stringify({ end: e.end, ply: session.ply, fen: session.chess.fen(), color: session.myColor, routeSwitches })
+      )
       session.chat({ quick: 'gg' })
       setTimeout(() => shutdown(0), 3000)
       break
   }
 }
 
+let drawOffered = false
 function maybeMove() {
   if (!session?.myTurn) return
   setTimeout(() => {
@@ -185,7 +205,8 @@ function maybeMove() {
     const pool = captures.length && Math.random() < 0.7 ? captures : moves
     const m = pool[Math.floor(Math.random() * pool.length)]
     if (!session.move(m.from + m.to + (m.promotion ?? ''))) log('my move was refused (out of time?)')
-  }, 1000 + Math.random() * 2000)
+    else if (session.ply >= maxPlies && !drawOffered && session.offerDraw()) drawOffered = true
+  }, thinkMs * (0.5 + Math.random()))
 }
 
 async function shutdown(code) {
