@@ -51,6 +51,7 @@ import {
   parseChallenge,
 } from './challenges';
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
+import { startMuteListSync } from './mutelist';
 import { loadMe, type Me } from './profile';
 import { RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
@@ -192,6 +193,7 @@ class OnlineController {
   private challengeTimer: ReturnType<typeof setTimeout> | null = null;
   /** The one peer a friend-challenge matchmaker is pairing with. */
   private matchmakerPeer: string | null = null;
+  private muteSyncStarted = false;
   /** The friend our current challenge also went to as a message (sent once). */
   private offlineSentTo: string | null = null;
   private listening = false;
@@ -520,7 +522,7 @@ class OnlineController {
     }
     log('blocked opponent');
     removeFriend(this.state.opponent.key);
-    block(this.state.opponent.key, this.state.opponent.nick);
+    block(this.state.opponent.key, this.state.opponent.nick, this.match?.opponent.npub);
   }
 
   /** A signed report on the current opponent (SPECS §14.2), for the share sheet. Also blocks them. */
@@ -558,6 +560,10 @@ class OnlineController {
       const [me, worker] = await Promise.all([loadMe(), getWorker()]);
       const { relay } = this.openTransports(me, worker);
       log('listening for friends');
+      if (!this.muteSyncStarted) {
+        this.muteSyncStarted = true;
+        startMuteListSync(log); // the block list from/to the relays (NIP-51)
+      }
       if (!this.dms) {
         // First time on this device: the last 30 days (relays keep messages a while).
         const since = syncedTo() || Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
