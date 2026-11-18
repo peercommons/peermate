@@ -23,14 +23,16 @@ export interface PeerNetwork {
 }
 
 /** `npub` comes from the opponent's signed HELLO, so it's bound to their peer key. */
-export type Opponent = { key: string; nick: string; npub?: string; rating?: number };
+export type Opponent = { key: string; nick: string; npub?: string; rating?: number; rd?: number };
 export type Match = { game: GameStart; channel: ReliableChannel; opponent: Opponent };
 
 export type MatchmakerOptions = {
   identity: Identity;
   nick: string;
   tc: string;
+  /** Our rating and deviation for this time control (rounded; sent in HELLO). */
   rating?: number;
+  rd?: number;
   network: PeerNetwork;
   timers?: Timers;
   onMatch: (m: Match) => void;
@@ -111,6 +113,7 @@ export class Matchmaker {
       nick: this.opts.nick,
       npub: this.opts.identity.nostr.publicKey,
       rating: this.opts.rating,
+      rd: this.opts.rd,
       invite: this.opts.invite ? this.opts.tc : undefined,
       // The wanted time control rides in a CHALLENGE; HELLO stays generic.
     });
@@ -242,7 +245,7 @@ export class Matchmaker {
     this.matched = {
       game,
       channel: state.channel,
-      opponent: { key: peer, nick: state.hello?.nick ?? 'Opponent', npub: state.hello?.npub, rating: state.hello?.rating },
+      opponent: { key: peer, nick: state.hello?.nick ?? 'Opponent', npub: state.hello?.npub, rating: state.hello?.rating, rd: state.hello?.rd },
     };
     this.close();
     this.opts.onMatch(this.matched);

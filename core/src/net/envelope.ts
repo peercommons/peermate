@@ -20,7 +20,9 @@ export type Message =
       proto: number[];
       nick: string;
       npub: string;
+      /** Self-reported Glicko-2 rating and deviation for the time control being sought (SPECS §7.5). */
       rating?: number;
+      rd?: number;
       /** A challenge to a friend: the time control offered (SPECS §2.1 Challenge a Friend). */
       invite?: string;
     }
@@ -108,6 +110,7 @@ const BODY_CHECKS: Record<MessageType, (b: Record<string, unknown>) => boolean> 
   HELLO: (b) =>
     isStr(b.app, 32) && Array.isArray(b.proto) && b.proto.every(isInt) && isStr(b.nick, 32) && isStr(b.npub, 64) &&
     (b.rating === undefined || isInt(b.rating)) &&
+    (b.rd === undefined || isInt(b.rd)) &&
     (b.invite === undefined || isStr(b.invite, 16)),
   CHALLENGE: (b) => isStr(b.tc, 16) && typeof b.rated === 'boolean' && isStr(b.commit) && HEX64.test(b.commit),
   ACCEPT: (b) => isStr(b.nonce) && HEX64.test(b.nonce),

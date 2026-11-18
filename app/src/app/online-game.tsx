@@ -164,7 +164,11 @@ export default function OnlineGameScreen() {
 
       <PlayerBar
         name={names[top]}
-        sub={top === them ? state.opponent.fingerprint : undefined}
+        sub={
+          top === them
+            ? `${state.opponent.rating ? `${state.opponent.rating} · ` : ''}${state.opponent.fingerprint}`
+            : undefined
+        }
         clock={formatClock(clocks[top])}
         active={running && session.chess.turn() === top}
         low={clocks[top] < 20_000}
@@ -199,6 +203,12 @@ export default function OnlineGameScreen() {
         {status}
       </Text>
       {state.notice && <Text style={styles.notice}>{state.notice}</Text>}
+      {state.ratingChange && (
+        <Text style={styles.subtle}>
+          Your rating: {state.ratingChange.shown} ({state.ratingChange.after >= state.ratingChange.before ? '+' : ''}
+          {Math.round(state.ratingChange.after - state.ratingChange.before)})
+        </Text>
+      )}
       {!state.end && state.connection === 'relayed' && timeControlClass(state.tc) === 'bullet' && (
         <Text style={styles.subtle}>{RELAYED_BULLET_WARNING}</Text>
       )}

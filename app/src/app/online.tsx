@@ -2,12 +2,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, router, useFocusEffect } from 'expo-router';
-import { timeControlClass } from '@peermate/core';
+import { formatRating, NEW_RATING, TIME_CONTROL_CLASSES, timeControlClass } from '@peermate/core';
+import { useRatings } from '../net/ratings';
 import { online, TIME_CONTROLS, useOnline } from '../net/online';
 import { loadMe, type Me } from '../net/profile';
 import { ui } from '../theme';
 
 export default function OnlineLobby() {
+  const ratings = useRatings();
   const state = useOnline();
   const [me, setMe] = useState<Me | null>(null);
   const [tc, setTc] = useState<string>('5+0');
@@ -39,6 +41,15 @@ export default function OnlineLobby() {
         <Text style={styles.label}>Playing as</Text>
         <Text style={styles.nick}>{me?.profile.nick ?? '…'}</Text>
         <Text style={styles.subtle}>ID {me?.fingerprint ?? '…'}</Text>
+        <Text style={styles.subtle}>
+          {TIME_CONTROL_CLASSES.map(
+            (c) => `${c[0].toUpperCase()}${c.slice(1)} ${formatRating(ratings[c] ?? NEW_RATING)}`,
+          ).join(' · ')}
+        </Text>
+        <Text style={styles.fine}>
+          Ratings are worked out on your phone from your online games, and aren't official. "?" means not enough
+          games yet.
+        </Text>
         <Link href="/settings" style={styles.link}>
           Change name or back up your ID
         </Link>
@@ -142,6 +153,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, fontWeight: '600', color: ui.subtle },
   nick: { fontSize: 22, fontWeight: '700', color: ui.text },
   subtle: { color: ui.subtle },
+  fine: { color: ui.subtle, fontSize: 12 },
   link: { color: ui.accent, fontWeight: '600', paddingVertical: 4 },
   row: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   chip: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: ui.border },

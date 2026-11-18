@@ -31,10 +31,14 @@ import {
   type SessionEvent,
   type SessionSnapshot,
   buildReport,
+  formatRating,
+  roomsToJoin,
+  sanitizeOpponent,
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
 import { block, isBlocked } from './blocklist';
 import { addMessage, isUnread, MESSAGE_MAX, setStatus, syncedTo } from './messages';
+import { applyResult, myRating } from './ratings';
 import { notifyMessage } from './notify';
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
@@ -72,8 +76,10 @@ export type OnlineState =
       phase: 'game';
       tc: string;
       myColor: Color;
-      opponent: { key: string; nick: string; fingerprint: string };
+      opponent: { key: string; nick: string; fingerprint: string; rating: string | null };
       connection: Connection;
+      /** After a rated game: our rating before and after (SPECS §7.5). */
+      ratingChange: { before: number; after: number; shown: string } | null;
       end: GameEnd | null;
       drawOffered: boolean;
       notice: string | null;
@@ -116,7 +122,7 @@ type SavedGame = {
   v: 1;
   tc: string;
   startedAt: number;
-  opponent: { key: string; nick: string; npub?: string };
+  opponent: { key: string; nick: string; npub?: string; rating?: number; rd?: number };
   channel: ChannelSnapshot;
   session: SessionSnapshot;
 };
@@ -130,6 +136,17 @@ export const QUICK_TEXT: Record<string, string> = {
   oops: 'Oops',
   wp: 'Well played',
 };
+
+/** Our rating for a time control, as sent in HELLO (whole numbers). */
+function ratingFor(tc: string): { rating: number; rd: number } {
+  const r = myRating(timeControlClass(tc));
+  return { rating: Math.round(r.r), rd: Math.round(r.rd) };
+}
+
+/** An opponent's self-reported rating, for display ("1532", "1500?"), or null if they sent none. */
+function shownRating(o: { rating?: number; rd?: number }): string | null {
+  return o.rating === undefined ? null : formatRating(sanitizeOpponent(o.rating, o.rd));
+}
 
 class OnlineController {
   state: OnlineState = { phase: 'idle' };
@@ -210,11 +227,14 @@ class OnlineController {
         identity: me.identity,
         nick: me.profile.nick,
         tc,
+        ...ratingFor(tc),
         network: router,
         onMatch: (m) => this.onMatch(m, tc),
         isBlocked,
       });
-      const rooms = [lobbyRoom(timeControlClass(tc), 'any')];
+      // Our rating band's room and the class-wide one: similar players meet first,
+      // and nobody waits for lack of them (SPECS §6.2).
+      const rooms = roomsToJoin(timeControlClass(tc), myRating(timeControlClass(tc)).r);
       worker.send({ type: 'seek', rooms });
       relay.seek(rooms, { tc, nick: me.profile.nick });
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0 });
@@ -328,7 +348,13 @@ class OnlineController {
       v: 1,
       tc: this.state.tc,
       startedAt: this.startedAt,
-      opponent: { key: this.match.opponent.key, nick: this.match.opponent.nick, npub: this.match.opponent.npub },
+      opponent: {
+        key: this.match.opponent.key,
+        nick: this.match.opponent.nick,
+        npub: this.match.opponent.npub,
+        rating: this.match.opponent.rating,
+        rd: this.match.opponent.rd,
+      },
       channel: this.match.channel.snapshot(),
       session: s.snapshot(),
     };
@@ -412,7 +438,8 @@ class OnlineController {
         phase: 'game',
         tc: saved.tc,
         myColor: game.myColor,
-        opponent: { key: opp.key, nick: opp.nick, fingerprint: fingerprint(opp.key) },
+        opponent: { key: opp.key, nick: opp.nick, fingerprint: fingerprint(opp.key), rating: shownRating(opp) },
+        ratingChange: null,
         connection: opp.npub ? 'relayed' : 'reconnecting',
         end: null,
         drawOffered: false,
@@ -684,6 +711,7 @@ class OnlineController {
         identity: me.identity,
         nick: me.profile.nick,
         tc,
+        ...ratingFor(tc),
         network: router,
         only: key,
         invite: inviting,
@@ -851,7 +879,13 @@ class OnlineController {
       phase: 'game',
       tc,
       myColor: m.game.myColor,
-      opponent: { key: m.opponent.key, nick: m.opponent.nick, fingerprint: fingerprint(m.opponent.key) },
+      opponent: {
+        key: m.opponent.key,
+        nick: m.opponent.nick,
+        fingerprint: fingerprint(m.opponent.key),
+        rating: shownRating(m.opponent),
+      },
+      ratingChange: null,
       connection: route === 'direct' ? 'direct' : 'relayed',
       end: null,
       drawOffered: false,
@@ -891,11 +925,28 @@ class OnlineController {
       case 'ended':
         log('ended', JSON.stringify(e.end), 'at ply', this.session?.ply);
         this.clearSaved();
-        this.patchGame({ end: e.end, drawOffered: false, notice: null });
+        this.patchGame({ end: e.end, drawOffered: false, notice: null, ratingChange: this.rate(e.end) });
         this.announce(); // back to "online"
         void this.saveFinished(e.end);
         return;
     }
+  }
+
+  /**
+   * Updates our rating for a finished game. Aborted games and one-sided
+   * results (opponent vanished, unconfirmed) don't count.
+   */
+  private rate(end: GameEnd): { before: number; after: number; shown: string } | null {
+    const s = this.session;
+    const m = this.match;
+    if (!s || !m || this.state.phase !== 'game' || end.aborted || end.unconfirmed || !end.outcome) return null;
+    const w = end.outcome.winner;
+    const score = w === null ? 0.5 : w === s.myColor ? 1 : 0;
+    const cls = timeControlClass(this.state.tc);
+    const res = applyResult(m.game.start.gid, cls, sanitizeOpponent(m.opponent.rating, m.opponent.rd), score);
+    if (!res) return null;
+    log('rating', cls, Math.round(res.before.r), '->', Math.round(res.after.r));
+    return { before: res.before.r, after: res.after.r, shown: formatRating(res.after) };
   }
 
   private async saveFinished(end: GameEnd) {

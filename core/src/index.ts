@@ -11,3 +11,4 @@ export * from './net/session.ts';
 export * from './net/matchmaker.ts';
 export * from './net/router.ts';
 export * from './net/report.ts';
+export * from './rating.ts';
