@@ -112,6 +112,9 @@ export default function Home() {
         <Link href="/dev" style={styles.devLink}>
           Dev tools
         </Link>
+        <Link href="/relays" style={styles.devLink}>
+          Relay check
+        </Link>
       </View>
     </ScrollView>
   );
