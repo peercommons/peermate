@@ -129,6 +129,8 @@ if (!relayOnly) {
 }
 
 log(`${nick} · ID ${fingerprint(identity.peer.publicKey)} · seeking ${tc}${relayOnly ? ' (relays only)' : ''}`)
+// Paste into the app's Friends screen to add this bot; it accepts a challenge at its time control.
+log(`friend link: peermate://p/${identity.peer.publicKey}?n=${identity.nostr.publicKey}&nick=${encodeURIComponent(nick)}`)
 mm = new Matchmaker({
   identity,
   nick,

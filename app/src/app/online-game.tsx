@@ -21,6 +21,7 @@ import { PromotionPicker } from '../components/PromotionPicker';
 import { formatMoves } from '../game/format';
 import { online, QUICK_TEXT, RELAYED_BULLET_WARNING, useOnline, type Connection } from '../net/online';
 import { useBlocked } from '../net/blocklist';
+import { useFriends } from '../net/friends';
 import { useSettings } from '../settings';
 import { BOARD_THEMES, ui } from '../theme';
 
@@ -39,6 +40,7 @@ export default function OnlineGameScreen() {
   const state = useOnline();
   const session = online.session;
   const blockedList = useBlocked();
+  const friendList = useFriends();
   const { settings } = useSettings();
   const { width } = useWindowDimensions();
   const boardSize = Math.min(width - 16, 560);
@@ -281,6 +283,11 @@ export default function OnlineGameScreen() {
         )}
       </View>
 
+      {state.end && !blocked && !friendList.some((f) => f.key === state.opponent.key) && (
+        <Pressable onPress={() => online.addOpponentAsFriend()} accessibilityRole="button" style={styles.reportLink}>
+          <Text style={styles.friendText}>Add {state.opponent.nick} as a friend</Text>
+        </Pressable>
+      )}
       <Pressable onPress={blockOrReport} accessibilityRole="button" style={styles.reportLink}>
         <Text style={styles.reportText}>
           {blocked ? `${state.opponent.nick} is blocked · Report` : `Block or report ${state.opponent.nick}`}
@@ -362,6 +369,7 @@ const styles = StyleSheet.create({
   subtle: { textAlign: 'center', color: ui.subtle, paddingHorizontal: 8 },
   reportLink: { alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 12 },
   reportText: { color: ui.subtle, fontSize: 12, textDecorationLine: 'underline' },
+  friendText: { color: ui.accent, fontWeight: '700' },
   panel: { flex: 1, backgroundColor: ui.card, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: ui.border },
   panelContent: { padding: 10, gap: 4 },
   moves: { fontSize: 14, lineHeight: 22, color: ui.text },

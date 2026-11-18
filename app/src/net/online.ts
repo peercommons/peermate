@@ -14,6 +14,7 @@ import { appLog } from '../../modules/peermate-log';
 import Storage from 'expo-sqlite/kv-store';
 import {
   decode,
+  parseTimeControl,
   fingerprint,
   PeerRouter,
   wireSender,
@@ -33,6 +34,7 @@ import {
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
 import { block, isBlocked } from './blocklist';
+import { addFriend, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
 import { RelayNet, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
@@ -43,13 +45,19 @@ export const TIME_CONTROLS = ['1+0', '2+1', '3+2', '5+0', '10+0', '15+10'] as co
 export const RELAYED_BULLET_WARNING =
   'Playing through relays: each move takes 1–3 s to arrive. The clocks make up for part of the delay, but bullet will feel slow.';
 
+/** A friend's challenge waiting for an answer. */
+export type Invite = { key: string; nick: string; tc: string; at: number };
+
+/** How long a friend has to answer a challenge. */
+export const INVITE_TIMEOUT_MS = 120_000;
+
 export type ChatLine = { from: 'me' | 'opponent'; text: string; at: number };
 export type Connection = 'direct' | 'relayed' | 'reconnecting';
 
 export type OnlineState =
   | { phase: 'idle' }
-  | { phase: 'starting'; tc: string }
-  | { phase: 'seeking'; tc: string; since: number; lobbyPeers: number }
+  | { phase: 'starting'; tc: string; friend?: string }
+  | { phase: 'seeking'; tc: string; since: number; lobbyPeers: number; friend?: string }
   | {
       phase: 'game';
       tc: string;
@@ -127,6 +135,12 @@ class OnlineController {
   private startedAt = 0;
   private resuming: Promise<boolean> | null = null;
   private lingering: Promise<void> | null = null;
+  /** An incoming friend challenge (shown as a dialog anywhere in the app). */
+  invite: Invite | null = null;
+  private inviteTimer: ReturnType<typeof setTimeout> | null = null;
+  private challengeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The one peer a friend-challenge matchmaker is pairing with. */
+  private matchmakerPeer: string | null = null;
   /** When the current direct link to the opponent came up (grace period for the stale check). */
   private directSince = 0;
 
@@ -184,12 +198,17 @@ class OnlineController {
       relay.seek(rooms, { tc, nick: me.profile.nick });
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0 });
     } catch (err) {
-      this.set({ phase: 'error', message: (err as Error).message });
+      this.set({ phase: 'error', message: `Couldn't start: ${(err as Error).message}` });
     }
   }
 
   cancelSeek(): void {
     if (this.state.phase !== 'seeking' && this.state.phase !== 'starting') return;
+    if (this.challengeTimer) clearTimeout(this.challengeTimer);
+    this.challengeTimer = null;
+    // A friend challenge: take the invitation back, so their dialog closes.
+    const invited = this.state.friend ? this.matchmakerPeer : null;
+    if (invited) this.sendDecline(invited, 'cancelled');
     this.matchmaker?.close();
     this.matchmaker = null;
     this.worker?.send({ type: 'unseek' });
@@ -232,6 +251,11 @@ class OnlineController {
   }
 
   private openTransports(me: Me, worker: P2PWorker | null) {
+    // Shared by searches, games and listening for friends' challenges.
+    if (this.relay && this.router) {
+      if (worker && this.worker !== worker) this.attachWorker(worker);
+      return { relay: this.relay, router: this.router };
+    }
     const relay = new RelayNet({
       nostrSecret: me.identity.nostr.secretKey,
       peerKey: me.identity.peer.publicKey,
@@ -257,6 +281,10 @@ class OnlineController {
 
   /** Feeds a message from `peer` to the running game or the matchmaker. */
   private deliver(peer: string, wire: string) {
+    if (!this.isOpponent(peer) && !this.matchmaker) {
+      this.checkInvite(peer, wire);
+      return;
+    }
     if (this.isOpponent(peer)) {
       this.match!.channel.receive(wire);
       // First word from the opponent after a resume: we're back in touch.
@@ -391,6 +419,11 @@ class OnlineController {
   }
 
   private closeTransports() {
+    // With friends, stay reachable for their challenges while the app is open.
+    if (friends().length > 0) {
+      this.relay?.unseek();
+      return;
+    }
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.relay?.close();
@@ -410,6 +443,7 @@ class OnlineController {
       else this.resign();
     }
     log('blocked opponent');
+    removeFriend(this.state.opponent.key);
     block(this.state.opponent.key, this.state.opponent.nick);
   }
 
@@ -431,6 +465,150 @@ class OnlineController {
       reason,
       at: Date.now(),
     });
+  }
+
+  // ---- friends ------------------------------------------------------------
+
+  /**
+   * Stays reachable for friends' challenges while the app is open: the P2P
+   * worker listens on our key, and the relay inbox is subscribed.
+   */
+  async listen(): Promise<void> {
+    if (friends().length === 0 || (this.relay && this.worker)) return;
+    try {
+      const [me, worker] = await Promise.all([loadMe(), getWorker()]);
+      this.openTransports(me, worker);
+      log('listening for friends');
+    } catch (err) {
+      log('listen failed:', String(err));
+    }
+  }
+
+  /** A message from someone we're not playing or pairing with: a friend's challenge? */
+  private checkInvite(peer: string, wire: string) {
+    const env = decode(wire);
+    if (!env || env.from !== peer) return;
+    if (env.body.t === 'DECLINE' && this.invite?.key === peer) {
+      log('invite withdrawn by', this.invite.nick);
+      return this.clearInvite();
+    }
+    if (env.body.t !== 'HELLO' || !env.body.invite) return;
+    const hello = env.body;
+    if (!isFriend(peer) || isBlocked(peer)) return;
+    try {
+      parseTimeControl(hello.invite!);
+    } catch {
+      return;
+    }
+    refreshFriend(peer, hello.npub, hello.nick);
+    this.router?.relayKnown(peer, hello.npub);
+    const busy = this.state.phase !== 'idle' && !(this.state.phase === 'game' && this.state.end);
+    if (busy) return this.sendDecline(peer, 'busy');
+    if (this.invite?.key === peer && this.invite.tc === hello.invite) return; // a resend
+    log('invite from', hello.nick, hello.invite);
+    this.invite = { key: peer, nick: getFriend(peer)?.nick ?? hello.nick, tc: hello.invite!, at: Date.now() };
+    if (this.inviteTimer) clearTimeout(this.inviteTimer);
+    this.inviteTimer = setTimeout(() => this.clearInvite(), INVITE_TIMEOUT_MS);
+    this.emit();
+  }
+
+  private clearInvite() {
+    if (this.inviteTimer) clearTimeout(this.inviteTimer);
+    this.inviteTimer = null;
+    this.invite = null;
+    this.emit();
+  }
+
+  private emit() {
+    for (const l of [...this.listeners]) l();
+  }
+
+  private sendDecline(peer: string, reason: string) {
+    const router = this.router;
+    if (!router) return;
+    void loadMe().then((me) => {
+      const ch = new ReliableChannel({ key: me.identity.peer, peer, send: (w) => router.send(peer, w) });
+      ch.send({ t: 'DECLINE', reason });
+      setTimeout(() => ch.close(), 30_000); // resent until acknowledged, for a while
+    });
+  }
+
+  /** Challenges a friend; they get a dialog, and the game starts if they accept. */
+  async challenge(friendKey: string, tc: string): Promise<void> {
+    const friend = getFriend(friendKey);
+    if (!friend) return;
+    await this.pair(friend.key, friend.npub, friend.nick, tc, true);
+  }
+
+  async acceptInvite(): Promise<void> {
+    const inv = this.invite;
+    if (!inv) return;
+    this.clearInvite();
+    const friend = getFriend(inv.key);
+    if (!friend) return;
+    await this.pair(friend.key, friend.npub, friend.nick, inv.tc, false);
+  }
+
+  declineInvite(): void {
+    const inv = this.invite;
+    if (!inv) return;
+    this.clearInvite();
+    this.sendDecline(inv.key, 'declined');
+  }
+
+  /** Pairs with one known player (a friend challenge, either side). */
+  private async pair(key: string, npub: string, nick: string, tc: string, inviting: boolean) {
+    log(inviting ? 'challenge' : 'accept', nick, tc, 'from state', this.state.phase);
+    if (this.lingering) await this.lingering;
+    if (this.resuming && (await this.resuming)) return;
+    if (this.state.phase === 'starting' || this.state.phase === 'seeking') this.cancelSeek();
+    if (this.state.phase === 'game' && !this.state.end) return;
+    this.leave();
+    this.set({ phase: 'starting', tc, friend: nick });
+    try {
+      const [me, worker] = await Promise.all([loadMe(), getWorker()]);
+      if ((this.state as OnlineState).phase !== 'starting') return;
+      this.lobbyPeers.clear();
+      const { router } = this.openTransports(me, worker);
+      router.relayKnown(key, npub);
+      this.matchmaker = new Matchmaker({
+        identity: me.identity,
+        nick: me.profile.nick,
+        tc,
+        network: router,
+        only: key,
+        invite: inviting,
+        helloTimeoutMs: INVITE_TIMEOUT_MS,
+        onMatch: (m) => this.onMatch(m, tc),
+        onDeclined: (reason) => this.challengeOver(reason === 'busy' ? `${nick} is busy` : `${nick} declined`),
+      });
+      this.matchmakerPeer = key;
+      worker.send({ type: 'connect', peer: key }); // direct if we can; the relays otherwise
+      this.matchmaker.peerConnected(key);
+      this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0, friend: nick });
+      if (this.challengeTimer) clearTimeout(this.challengeTimer);
+      this.challengeTimer = setTimeout(() => {
+        if (this.state.phase === 'seeking' && this.state.friend) this.challengeOver(`${nick} didn't answer`);
+      }, INVITE_TIMEOUT_MS + 5_000);
+    } catch (err) {
+      this.set({ phase: 'error', message: `Couldn't start: ${(err as Error).message}` });
+    }
+  }
+
+  private challengeOver(message: string) {
+    log('challenge over:', message);
+    this.matchmaker?.close();
+    this.matchmaker = null;
+    this.closeTransports();
+    this.set({ phase: 'error', message });
+  }
+
+  /** Adds the current (or last) opponent as a friend. */
+  addOpponentAsFriend(): void {
+    const opp = this.match?.opponent;
+    if (!opp?.npub) return;
+    addFriend(opp.key, opp.npub, opp.nick);
+    void this.listen();
   }
 
   private gameRunning(): boolean {
@@ -501,7 +679,7 @@ class OnlineController {
     if (!decode(wire)) return;
     this.router.relayKnown(peer, npub);
     if (!this.isOpponent(peer)) {
-      if (this.state.phase !== 'seeking') return;
+      if (this.state.phase !== 'seeking') return this.checkInvite(peer, wire);
       this.noteLobbyPeer(peer);
       this.matchmaker?.peerConnected(peer);
     }
@@ -543,6 +721,8 @@ class OnlineController {
   }
 
   private onMatch(m: Match, tc: string) {
+    if (this.challengeTimer) clearTimeout(this.challengeTimer);
+    this.challengeTimer = null;
     this.match = m;
     log('matched', m.opponent.nick, 'as', m.game.myColor, 'via', this.router?.route(m.opponent.key));
     this.worker?.send({ type: 'unseek' });
@@ -664,6 +844,11 @@ class OnlineController {
 }
 
 export const online = new OnlineController();
+
+/** The pending friend challenge, if any (re-renders when it changes). */
+export function useInvite(): Invite | null {
+  return useSyncExternalStore(online.subscribe, () => online.invite);
+}
 
 export function useOnline(): OnlineState {
   return useSyncExternalStore(online.subscribe, online.getSnapshot);

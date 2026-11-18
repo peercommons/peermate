@@ -101,6 +101,9 @@ export default function Home() {
         <Link href="/history" style={styles.link}>
           Your games
         </Link>
+        <Link href="/friends" style={styles.link}>
+          Friends
+        </Link>
         <Link href="/settings" style={styles.link}>
           Settings
         </Link>

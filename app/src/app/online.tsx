@@ -80,9 +80,14 @@ export default function OnlineLobby() {
               <Text style={styles.status}>
                 {state.phase === 'starting'
                   ? 'Connecting to the network…'
-                  : `Looking for a ${state.tc} opponent · ${Math.floor((now - state.since) / 1000)} s`}
+                  : state.friend
+                    ? `Waiting for ${state.friend} to accept ${state.tc} · ${Math.floor((now - state.since) / 1000)} s`
+                    : `Looking for a ${state.tc} opponent · ${Math.floor((now - state.since) / 1000)} s`}
               </Text>
-              {state.phase === 'seeking' && (
+              {state.phase === 'seeking' && state.friend && (
+                <Text style={styles.subtle}>They get your challenge if Peermate is open on their phone.</Text>
+              )}
+              {state.phase === 'seeking' && !state.friend && (
                 <Text style={styles.subtle}>
                   {state.lobbyPeers === 0
                     ? 'Waiting for another player to connect'
@@ -95,7 +100,7 @@ export default function OnlineLobby() {
             <Primary label="Find opponent" onPress={() => online.seek(tc)} />
           )}
 
-          {state.phase === 'error' && <Text style={styles.error}>Couldn't start: {state.message}</Text>}
+          {state.phase === 'error' && <Text style={styles.error}>{state.message}</Text>}
         </View>
       )}
 

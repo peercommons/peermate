@@ -14,7 +14,16 @@ export const MAX_CHAT_LENGTH = 280;
 export const MAX_WIRE_BYTES = 4096;
 
 export type Message =
-  | { t: 'HELLO'; app: string; proto: number[]; nick: string; npub: string; rating?: number }
+  | {
+      t: 'HELLO';
+      app: string;
+      proto: number[];
+      nick: string;
+      npub: string;
+      rating?: number;
+      /** A challenge to a friend: the time control offered (SPECS §2.1 Challenge a Friend). */
+      invite?: string;
+    }
   | { t: 'CHALLENGE'; tc: string; rated: boolean; commit: string }
   | { t: 'ACCEPT'; nonce: string }
   | { t: 'DECLINE'; reason: string }
@@ -98,7 +107,8 @@ const isStr = (s: unknown, max = 128): s is string => typeof s === 'string' && s
 const BODY_CHECKS: Record<MessageType, (b: Record<string, unknown>) => boolean> = {
   HELLO: (b) =>
     isStr(b.app, 32) && Array.isArray(b.proto) && b.proto.every(isInt) && isStr(b.nick, 32) && isStr(b.npub, 64) &&
-    (b.rating === undefined || isInt(b.rating)),
+    (b.rating === undefined || isInt(b.rating)) &&
+    (b.invite === undefined || isStr(b.invite, 16)),
   CHALLENGE: (b) => isStr(b.tc, 16) && typeof b.rated === 'boolean' && isStr(b.commit) && HEX64.test(b.commit),
   ACCEPT: (b) => isStr(b.nonce) && HEX64.test(b.nonce),
   DECLINE: (b) => isStr(b.reason, 64),

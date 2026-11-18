@@ -37,6 +37,16 @@ export type MatchmakerOptions = {
   onLog?: (message: string) => void;
   /** Players the user blocked: never paired, dropped on sight (SPECS §14.2). */
   isBlocked?: (peer: string) => boolean;
+  /**
+   * Friend challenge: pair with this one peer only. The challenger also sets
+   * `invite`, so its HELLO carries the time control for the friend to accept.
+   */
+  only?: string;
+  invite?: boolean;
+  /** How long a peer may take to say HELLO (a friend deciding on an invite takes a while). */
+  helloTimeoutMs?: number;
+  /** The friend turned the invitation down (a DECLINE before any HELLO). */
+  onDeclined?: (reason: string) => void;
 };
 
 /** A pairing handshake that hasn't finished by now is abandoned (peer vanished). */
@@ -68,6 +78,7 @@ export class Matchmaker {
    */
   peerConnected(peer: string): void {
     if (this.closed || this.matched || peer === this.me) return;
+    if (this.opts.only && peer !== this.opts.only) return;
     if (this.opts.isBlocked?.(peer)) {
       this.log(`${peer.slice(0, 8)}: blocked, dropping`);
       this.opts.network.drop(peer);
@@ -92,7 +103,7 @@ export class Matchmaker {
       this.log(`${peer.slice(0, 8)}: no hello, dropping`);
       this.peerLeft(peer);
       this.opts.network.drop(peer);
-    }, HELLO_TIMEOUT_MS);
+    }, this.opts.helloTimeoutMs ?? HELLO_TIMEOUT_MS);
     channel.send({
       t: 'HELLO',
       app: APP_ID,
@@ -100,6 +111,7 @@ export class Matchmaker {
       nick: this.opts.nick,
       npub: this.opts.identity.nostr.publicKey,
       rating: this.opts.rating,
+      invite: this.opts.invite ? this.opts.tc : undefined,
       // The wanted time control rides in a CHALLENGE; HELLO stays generic.
     });
   }
@@ -143,6 +155,12 @@ export class Matchmaker {
   }
 
   private onLobbyMessage(peer: string, state: PeerState, msg: Message) {
+    if (msg.t === 'DECLINE' && !state.hello && this.opts.only === peer) {
+      this.log(`${peer.slice(0, 8)}: invitation declined (${msg.reason})`);
+      this.close();
+      this.opts.onDeclined?.(msg.reason);
+      return;
+    }
     if (msg.t !== 'HELLO' || state.hello) return;
     if (!msg.proto.includes(PROTOCOL_VERSION)) {
       this.log(`${msg.nick}: incompatible protocol ${msg.proto.join(',')}`);
