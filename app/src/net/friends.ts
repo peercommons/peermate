@@ -7,6 +7,7 @@ import { useSyncExternalStore } from 'react';
 import Storage from 'expo-sqlite/kv-store';
 import { fingerprint } from '@peermate/core';
 import { unblock } from './blocklist';
+import { deleteThread } from './messages';
 
 const KEY = 'friends.v1';
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -68,6 +69,7 @@ export function refreshFriend(key: string, npub: string, nick: string): void {
 
 export function removeFriend(key: string): void {
   save(list.filter((f) => f.key !== key));
+  deleteThread(key); // their messages go too
 }
 
 export function useFriends(): Friend[] {
