@@ -218,7 +218,7 @@ Public MQTT brokers *can* work technically (topic = `peermate/v1/lobby/blitz`, p
 ### 5.1 Engine
 - **Arasan** (C++, by Jon Dart; MIT-style licence; actively maintained), pinned as a Git submodule at `native/arasan` (v26.1). Fathom (MIT), its tablebase-probing code, is built in because v26.1 doesn't compile without it; no tablebase files ship.
 - **Android:** `native/build-arasan-android.sh` cross-compiles a statically linked arm64 executable (NEON, 16 KB page-aligned, ~2 MB; 0.56 MB compressed in the APK) and installs it into the local Expo module `app/modules/arasan-engine` as `libarasan.so`. Android extracts it to `nativeLibraryDir`, the only place an app may execute files from on Android 10+. The module runs it as a **child process** and speaks UCI over stdin/stdout, so an engine crash can't take down the app.
-- **iOS** can't spawn processes: there the engine must be built as a library and run on a thread with in-memory pipes. Do this at the Phase 2 iOS checkpoint.
+- **iOS** can't spawn processes, so the engine runs **in process**. `native/build-arasan-ios.sh` compiles it as a static library (`libarasan.a`, arm64, NEON, ~2 MB) with `main` renamed `arasan_main`, from a copy of `globals.cpp` that skips raising the process stack limit (which would `exit()` the app on failure; search threads set their own 4 MB stacks). The module's bridge (`ios/ArasanBridge.mm`) replaces fds 0 and 1 with pipes and runs `arasan_main` on an 8 MB-stack thread for the life of the app; it never sends `quit`, since the engine's globals can't be initialised twice. The network ships in the app bundle and is used in place. An engine crash takes the app down on iOS, unlike Android. Verified on an iPhone 15 (iOS 27.2.1) at levels 3 and 10 (2026-11-18).
 - **Network:** `arasanv8-20261005.nnue`, 24 MB raw, **13.6 MB compressed in the APK**. Shipped as an asset and copied once to `filesDir` (the engine needs a file path), then set via `setoption name NNUE file value <path>`.
 - **Opening book: not shipped in v1.** `book.bin` is 27 MB (13 MB compressed), which would blow the download budget. Opening variety comes from the level randomness and, for strong levels, a small curated opening list (≤ 200 KB) chosen in Phase 1.
 - Android: native libs must be built with **16 KB page alignment** (Google Play requirement for apps targeting Android 15+).
@@ -585,7 +585,7 @@ One device and one carrier: keep collecting results from testers on other carrie
 /app                 # Expo/React Native app (prebuild generates ios/ and android/)
 /app/p2p-worklet     # Bare bundle (hyperswarm), built with bare-pack
 /native/arasan       # Arasan submodule (v26.1); build script in /native
-/app/modules/arasan-engine  # Expo module running the engine (UCI over a child process)
+/app/modules/arasan-engine  # Expo module running the engine over UCI (child process on Android, in process on iOS)
 /core                # Pure TS domain logic
 /fastlane            # Fastfile, Appfile, Matchfile, Pluginfile, metadata/, screenshots/
 /.github/workflows   # ci.yml, release.yml

@@ -9,9 +9,9 @@ let started: Promise<void> | null = null;
 let queue: Promise<unknown> = Promise.resolve();
 const listeners = new Set<(line: string) => void>();
 
-/** False where the engine isn't built yet (iOS): CPU play and analysis are off. */
+/** False where the engine isn't in the build: CPU play and analysis are off. */
 export const engineAvailable = ArasanEngine !== null;
-export const ENGINE_UNAVAILABLE = "The CPU opponent isn't available on iOS yet";
+export const ENGINE_UNAVAILABLE = "The CPU opponent isn't available in this build";
 
 ArasanEngine?.addListener('onLine', ({ line }) => {
   for (const listener of [...listeners]) listener(line);

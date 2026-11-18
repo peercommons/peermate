@@ -25,6 +25,7 @@ Node 22, JDK 17, Android SDK + NDK (API 29+ arm64 device or emulator), Ruby + Bu
 ```sh
 git submodule update --init native/arasan
 native/build-arasan-android.sh  # builds the chess engine into app/modules/arasan-engine
+native/build-arasan-ios.sh      # same for iOS (static library, needs Xcode)
 cd app && npm install
 npm run android          # build and install a dev build on a connected phone/emulator
 npm run test:p2p         # two P2P workers on a local testnet (no internet)
