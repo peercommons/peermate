@@ -525,7 +525,7 @@ VoiceOver/TalkBack: squares labelled ("e4, white knight"), move announcements, a
 - Re-run with ≥ 64 games per pair; at 16 games the error is ±150 Elo.
 - Anchor to human ratings, for example with opt-in result reporting from beta testers.
 - Add a nightly job that fails if levels aren't monotonic.
-- One engine timeout (no `bestmove` within 120 s) happened in a `UCI_Elo` 2700 vs full-strength game; it is being investigated.
+- One engine timeout (no `bestmove` within 120 s) happened in a `UCI_Elo` 2700 vs full-strength game. It did not reproduce in 16 more games of that pairing; the app's 60 s timeout turns a hang into "CPU unavailable" rather than a freeze. A restart-and-retry on timeout should be added.
 
 ### 12.4 E2E
 **Maestro** flows on iOS simulator + Android emulator: onboarding, vs-CPU game to mate, pass & play, two-emulator online game over local testnet, chat, block/report.
