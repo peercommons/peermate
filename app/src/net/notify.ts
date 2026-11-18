@@ -47,9 +47,9 @@ export function notifyMessage(friendKey: string, nick: string, text: string): vo
       title: nick,
       body: text.length > 200 ? `${text.slice(0, 200)}…` : text,
       data: { friendKey },
-      ...(Platform.OS === 'android' ? { channelId: CHANNEL } : {}),
     },
-    trigger: null,
+    // Android takes the channel from the trigger ("show now, on this channel").
+    trigger: Platform.OS === 'android' ? { channelId: CHANNEL } : null,
   }).catch(() => undefined);
 }
 
