@@ -4,7 +4,8 @@
 // Everything is an ephemeral event (relays forward, don't store):
 //   seek:    tags [t, "peermate-v1-<room>"], content {v, pk, tc, nick}
 //            pk = Ed25519 peer key; the event's own pubkey is our Nostr key.
-//   message: tags [p, <recipient npub>], content = NIP-44(protocol wire message)
+//   message: tags [p, <recipient npub>], content = NIP-44(protocol wire message,
+//            or "P:<online|playing|away>" for presence, sent to friends only)
 // Relays see who talks to whom and when, but not what. Delivery is best effort;
 // the reliable channel above retransmits, dedupes and orders.
 //
@@ -44,8 +45,14 @@ export type RelayOptions = {
   /** A protocol message for us, from Nostr key `npub`. */
   onMessage: (npub: string, wire: string) => void;
   onSeek?: (seek: Seek) => void;
+  /** A presence note from Nostr key `npub` (SPECS §6.5): only friends are sent these. */
+  onPresence?: (npub: string, status: PresenceStatus) => void;
   onLog?: (message: string) => void;
 };
+
+export type PresenceStatus = 'online' | 'playing' | 'away';
+const PRESENCE_PREFIX = 'P:';
+const PRESENCE = new Set<string>(['online', 'playing', 'away']);
 
 const roomTag = (room: string) => `peermate-v1-${room}`;
 
@@ -172,7 +179,17 @@ export class RelayNet {
     } catch {
       return; // not for us, or garbage
     }
+    if (wire.startsWith(PRESENCE_PREFIX)) {
+      const status = wire.slice(PRESENCE_PREFIX.length);
+      if (PRESENCE.has(status)) this.opts.onPresence?.(e.pubkey, status as PresenceStatus);
+      return;
+    }
     this.opts.onMessage(e.pubkey, wire);
+  }
+
+  /** Tells one friend we're around (encrypted to them; relays see only that we sent something). */
+  sendPresence(npub: string, status: PresenceStatus): void {
+    this.send(npub, PRESENCE_PREFIX + status);
   }
 
   /** Sends one protocol message to `npub`, encrypted. */

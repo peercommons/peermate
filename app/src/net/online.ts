@@ -34,9 +34,9 @@ import {
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
 import { block, isBlocked } from './blocklist';
-import { addFriend, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
+import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
-import { RelayNet, type Seek } from './relay';
+import { RelayNet, type PresenceStatus, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
 
 export const TIME_CONTROLS = ['1+0', '2+1', '3+2', '5+0', '10+0', '15+10'] as const;
@@ -47,6 +47,14 @@ export const RELAYED_BULLET_WARNING =
 
 /** A friend's challenge waiting for an answer. */
 export type Invite = { key: string; npub: string; nick: string; fingerprint: string; friend: boolean; tc: string; at: number };
+
+/** A friend's last presence note (SPECS §6.5). */
+export type Presence = { status: PresenceStatus; at: number };
+/** How often we tell each friend we're around, and how long a note counts. */
+const PRESENCE_EVERY_MS = 60_000;
+export const PRESENCE_FRESH_MS = 120_000;
+/** When a friend's note arrives and we haven't told them for this long, answer at once. */
+const PRESENCE_ANSWER_AFTER_MS = 30_000;
 
 /** How long a friend has to answer a challenge. */
 export const INVITE_TIMEOUT_MS = 120_000;
@@ -142,13 +150,22 @@ class OnlineController {
   /** The one peer a friend-challenge matchmaker is pairing with. */
   private matchmakerPeer: string | null = null;
   private listening = false;
+  /** Friends' presence, by peer key. Replaced (not mutated) on change, for React. */
+  presence: ReadonlyMap<string, Presence> = new Map();
+  private toldAt = new Map<string, number>();
+  private presenceTimer: ReturnType<typeof setInterval> | null = null;
   /** When the current direct link to the opponent came up (grace period for the stale check). */
   private directSince = 0;
 
   constructor() {
     setInterval(() => this.checkLink(), LINK_CHECK_MS);
     AppState.addEventListener('change', (s) => {
-      if (s === 'active') this.onForeground();
+      if (s === 'active') {
+        this.onForeground();
+        this.announce();
+      } else if (s === 'background') {
+        this.announce('away'); // best effort: iOS may suspend us first
+      }
     });
   }
 
@@ -262,6 +279,7 @@ class OnlineController {
       peerKey: me.identity.peer.publicKey,
       onMessage: (npub, wire) => this.onRelayMessage(npub, wire),
       onSeek: (seek) => this.onRelaySeek(seek),
+      onPresence: (npub, status) => this.onPresence(npub, status),
     });
     const router = new PeerRouter({
       directSend: (peer, data) => this.worker?.send({ type: 'send', peer, data }),
@@ -478,13 +496,43 @@ class OnlineController {
    */
   async listen(): Promise<void> {
     this.listening = true;
-    if (this.relay && this.worker) return;
+    if (this.relay && this.worker) return this.announce(); // e.g. a friend was just added
     try {
       const [me, worker] = await Promise.all([loadMe(), getWorker()]);
       this.openTransports(me, worker);
       log('listening for friends');
+      this.presenceTimer ??= setInterval(() => this.announce(), PRESENCE_EVERY_MS);
+      this.announce();
     } catch (err) {
       log('listen failed:', String(err));
+    }
+  }
+
+  private myStatus(): PresenceStatus {
+    return this.state.phase === 'game' && !this.state.end ? 'playing' : 'online';
+  }
+
+  /** Tells every friend we're around (or `status`), through the relays. */
+  private announce(status: PresenceStatus = this.myStatus()) {
+    if (!this.relay) return;
+    const now = Date.now();
+    for (const f of friends()) {
+      this.relay.sendPresence(f.npub, status);
+      this.toldAt.set(f.key, now);
+    }
+  }
+
+  private onPresence(npub: string, status: PresenceStatus) {
+    const f = friendByNpub(npub);
+    if (!f) return;
+    const next = new Map(this.presence);
+    next.set(f.key, { status, at: Date.now() });
+    this.presence = next;
+    this.emit();
+    // They just showed up: answer now rather than at our next round.
+    if (status !== 'away' && Date.now() - (this.toldAt.get(f.key) ?? 0) > PRESENCE_ANSWER_AFTER_MS) {
+      this.relay?.sendPresence(f.npub, this.myStatus());
+      this.toldAt.set(f.key, Date.now());
     }
   }
 
@@ -748,6 +796,7 @@ class OnlineController {
     if (route !== 'direct') this.worker?.send({ type: 'connect', peer: m.opponent.key });
     this.startedAt = Date.now();
     this.session = new GameSession({ channel: m.channel, game: m.game, onEvent: (e) => this.onSessionEvent(e) });
+    queueMicrotask(() => this.announce()); // friends see "playing" (after the state below is set)
     this.persist();
     this.set({
       phase: 'game',
@@ -794,6 +843,7 @@ class OnlineController {
         log('ended', JSON.stringify(e.end), 'at ply', this.session?.ply);
         this.clearSaved();
         this.patchGame({ end: e.end, drawOffered: false, notice: null });
+        this.announce(); // back to "online"
         void this.saveFinished(e.end);
         return;
     }
@@ -856,6 +906,16 @@ class OnlineController {
 }
 
 export const online = new OnlineController();
+
+/** Friends' presence by peer key (re-renders when it changes). */
+export function usePresence(): ReadonlyMap<string, Presence> {
+  return useSyncExternalStore(online.subscribe, () => online.presence);
+}
+
+/** What to show for a friend: their status, or offline if nothing recent arrived. */
+export function presenceOf(p: Presence | undefined, now = Date.now()): PresenceStatus | 'offline' {
+  return p && now - p.at < PRESENCE_FRESH_MS ? p.status : 'offline';
+}
 
 /** The pending friend challenge, if any (re-renders when it changes). */
 export function useInvite(): Invite | null {

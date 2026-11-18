@@ -39,6 +39,10 @@ export function getFriend(key: string): Friend | undefined {
   return list.find((f) => f.key === key);
 }
 
+export function friendByNpub(npub: string): Friend | undefined {
+  return list.find((f) => f.npub === npub);
+}
+
 export function isFriend(key: string): boolean {
   return list.some((f) => f.key === key);
 }

@@ -3,12 +3,25 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { addFriend, friendLink, parseFriendLink, removeFriend, useFriends, type Friend } from '../net/friends';
-import { online, TIME_CONTROLS } from '../net/online';
+import { online, presenceOf, TIME_CONTROLS, usePresence } from '../net/online';
 import { loadMe, type Me } from '../net/profile';
 import { ui } from '../theme';
 
+const STATUS = {
+  online: { label: 'Online', color: '#2e7d32' },
+  playing: { label: 'Playing a game', color: '#f9a825' },
+  away: { label: 'Away', color: '#9e9e9e' },
+  offline: { label: 'Offline', color: '#bdbdbd' },
+} as const;
+
 export default function FriendsScreen() {
   const list = useFriends();
+  const presence = usePresence();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000); // let stale presence go offline
+    return () => clearInterval(t);
+  }, []);
   const [me, setMe] = useState<Me | null>(null);
   const [paste, setPaste] = useState('');
   const [open, setOpen] = useState<string | null>(null);
@@ -82,7 +95,10 @@ export default function FriendsScreen() {
               <Text style={styles.name} numberOfLines={1}>
                 {f.nick}
               </Text>
-              <Text style={styles.subtle}>ID {f.fingerprint}</Text>
+              <Text style={styles.subtle}>
+                <Text style={{ color: STATUS[presenceOf(presence.get(f.key), now)].color }}>● </Text>
+                {STATUS[presenceOf(presence.get(f.key), now)].label} · ID {f.fingerprint}
+              </Text>
             </View>
             <Pressable
               onPress={() => setOpen(open === f.key ? null : f.key)}
@@ -95,6 +111,11 @@ export default function FriendsScreen() {
           </View>
           {open === f.key && (
             <>
+              {presenceOf(presence.get(f.key), now) !== 'online' && (
+                <Text style={styles.subtle}>
+                  {f.nick} may not see a challenge right now: it only arrives while Peermate is open on their phone.
+                </Text>
+              )}
               <Text style={styles.subtle}>Time control (minutes + seconds per move)</Text>
               <View style={styles.chips}>
                 {TIME_CONTROLS.map((t) => (
