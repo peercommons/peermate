@@ -1,11 +1,11 @@
 import '../../polyfills'; // must run before anything that generates keys
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack, router, usePathname } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { registerBackgroundCheck } from '../background';
 import { friendOf, isChallengeTap, setupNotifications } from '../net/notify';
-import { online, useInvite } from '../net/online';
+import { online, useInvite, useOnline } from '../net/online';
 import { StatusBar } from 'expo-status-bar';
 import { SettingsProvider } from '../settings';
 import { ui } from '../theme';
@@ -29,6 +29,20 @@ export default function RootLayout() {
     const sub = Notifications.addNotificationResponseReceivedListener(open);
     return () => sub.remove();
   }, []);
+
+  // A search or challenge just matched: open the game from wherever the player is
+  // (the Play online screen does this too, but only while it's on screen).
+  const state = useOnline();
+  const path = usePathname();
+  const prevPhase = useRef(state.phase);
+  useEffect(() => {
+    const was = prevPhase.current;
+    prevPhase.current = state.phase;
+    const matched = state.phase === 'game' && !state.end && (was === 'seeking' || was === 'starting');
+    if (!matched || path === '/online-game') return;
+    if (path === '/online') router.replace('/online-game');
+    else router.navigate('/online-game');
+  }, [state, path]);
 
   // A friend's challenge, wherever the player is in the app.
   const invite = useInvite();

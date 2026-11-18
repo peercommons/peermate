@@ -21,10 +21,7 @@ export default function OnlineLobby() {
     }, []),
   );
 
-  // Matched: go to the game.
-  useEffect(() => {
-    if (state.phase === 'game' && !state.end) router.replace('/online-game');
-  }, [state]);
+  // Matched: _layout opens the game (from any screen).
 
   useEffect(() => {
     if (state.phase !== 'seeking') return;
