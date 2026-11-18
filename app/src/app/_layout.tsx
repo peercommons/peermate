@@ -1,10 +1,17 @@
 import '../../polyfills'; // must run before anything that generates keys
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
+import { online } from '../net/online';
 import { StatusBar } from 'expo-status-bar';
 import { SettingsProvider } from '../settings';
 import { ui } from '../theme';
 
 export default function RootLayout() {
+  // An online game that was running when the app closed carries on.
+  useEffect(() => {
+    if (online.savedOpponent()) online.resumeSaved();
+  }, []);
+
   return (
     <SettingsProvider>
       <StatusBar style="dark" />

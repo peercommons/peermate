@@ -22,7 +22,8 @@ export interface PeerNetwork {
   drop(peer: string): void;
 }
 
-export type Opponent = { key: string; nick: string; rating?: number };
+/** `npub` comes from the opponent's signed HELLO, so it's bound to their peer key. */
+export type Opponent = { key: string; nick: string; npub?: string; rating?: number };
 export type Match = { game: GameStart; channel: ReliableChannel; opponent: Opponent };
 
 export type MatchmakerOptions = {
@@ -206,7 +207,7 @@ export class Matchmaker {
     this.matched = {
       game,
       channel: state.channel,
-      opponent: { key: peer, nick: state.hello?.nick ?? 'Opponent', rating: state.hello?.rating },
+      opponent: { key: peer, nick: state.hello?.nick ?? 'Opponent', npub: state.hello?.npub, rating: state.hello?.rating },
     };
     this.close();
     this.opts.onMatch(this.matched);

@@ -50,6 +50,22 @@ export type SessionEvent =
   | { type: 'clockDiscrepancy'; count: number }
   | { type: 'ended'; end: GameEnd };
 
+/** Everything needed to rebuild a session after an app restart (with its channel's snapshot). */
+export type SessionSnapshot = {
+  game: GameStart;
+  moves: string[];
+  hash: string;
+  remaining: Record<Color, number>;
+  lastReport: number;
+  turnStartedAt: number;
+  discrepancies: number;
+  end: GameEnd | null;
+  drawOfferFromOpponent: number | null;
+  myDrawOffer: number | null;
+  myMoveSeq: number;
+  myMoveAckedAt: number | null;
+};
+
 export class GameSession {
   readonly chess: Chess;
   readonly myColor: Color;
@@ -75,7 +91,10 @@ export class GameSession {
   private chatTimes: number[] = [];
   private pingTimer: unknown = null;
 
+  private readonly game: GameStart;
+
   constructor(opts: { channel: ReliableChannel; game: GameStart; onEvent: (e: SessionEvent) => void; timers?: Timers }) {
+    this.game = opts.game;
     this.channel = opts.channel;
     this.timers = opts.timers ?? realTimers;
     this.emit = opts.onEvent;
@@ -215,6 +234,53 @@ export class GameSession {
     this.channel.send(msg);
     this.emit({ type: 'chat', from: 'me', ...('text' in content ? { text: content.text.trim() } : content) });
     return true;
+  }
+
+  snapshot(): SessionSnapshot {
+    return {
+      game: this.game,
+      moves: this.chess.history({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? '')),
+      hash: this.hash,
+      remaining: { ...this.remaining },
+      lastReport: this.lastReport,
+      turnStartedAt: this.turnStartedAt,
+      discrepancies: this.discrepancies,
+      end: this.end,
+      drawOfferFromOpponent: this.drawOfferFromOpponent,
+      myDrawOffer: this.myDrawOffer,
+      myMoveSeq: this.myMoveSeq,
+      myMoveAckedAt: this.myMoveAckedAt,
+    };
+  }
+
+  /**
+   * Rebuilds a session saved with snapshot(), on a restored channel. Clocks keep
+   * running while the app was closed (turnStartedAt is wall-clock time).
+   */
+  static restore(opts: {
+    channel: ReliableChannel;
+    snapshot: SessionSnapshot;
+    onEvent: (e: SessionEvent) => void;
+    timers?: Timers;
+  }): GameSession {
+    const snap = opts.snapshot;
+    const s = new GameSession({ channel: opts.channel, game: snap.game, onEvent: opts.onEvent, timers: opts.timers });
+    for (const uci of snap.moves) {
+      if (!tryMove(s.chess, parseUci(uci))) throw new Error(`saved game has an illegal move: ${uci}`);
+    }
+    s.hash = snap.hash;
+    s.remaining.w = snap.remaining.w;
+    s.remaining.b = snap.remaining.b;
+    s.lastReport = snap.lastReport;
+    s.turnStartedAt = snap.turnStartedAt;
+    s.discrepancies = snap.discrepancies;
+    s.end = snap.end;
+    s.drawOfferFromOpponent = snap.drawOfferFromOpponent;
+    s.myDrawOffer = snap.myDrawOffer;
+    s.myMoveSeq = snap.myMoveSeq;
+    s.myMoveAckedAt = snap.myMoveAckedAt;
+    if (s.end) s.dispose();
+    return s;
   }
 
   /** Stops background work (pings). The channel stays open for chat and retransmits. */

@@ -22,7 +22,7 @@ export type WorkerCommand =
   | { type: 'drop'; peer: string };
 
 export type P2PWorker = {
-  publicKey: string;
+  readonly publicKey: string;
   send(cmd: WorkerCommand): void;
   /** Subscribes to worker events; returns an unsubscribe function. */
   on(listener: (e: WorkerEvent) => void): () => void;
@@ -62,32 +62,47 @@ async function start(): Promise<P2PWorker> {
     }
   });
 
-  // Switch the worker from its throwaway key to the player's key.
-  const expected = me.identity.peer.publicKey;
-  const ready = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('P2P worker did not start')), 20000);
-    const listener = (e: WorkerEvent) => {
-      if (e.type === 'ready' && e.publicKey === expected) {
-        clearTimeout(timer);
-        listeners.delete(listener);
-        resolve();
-      } else if (e.type === 'error') {
-        clearTimeout(timer);
-        listeners.delete(listener);
-        reject(new Error(e.message));
-      }
-    };
-    listeners.add(listener);
-  });
-  write({ type: 'init', secret: toHex(me.identity.peer.secretKey) });
-  await ready;
-
-  return {
-    publicKey: expected,
+  const handle = {
+    publicKey: '',
     send: write,
-    on(listener) {
+    on(listener: (e: WorkerEvent) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
   };
+  // Switch the worker from its throwaway key to the player's key.
+  await initWith(me.identity.peer.publicKey, toHex(me.identity.peer.secretKey));
+  current = { init: initWith };
+  return handle;
+
+  async function initWith(expected: string, secretHex: string) {
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('P2P worker did not start')), 20000);
+      const listener = (e: WorkerEvent) => {
+        if (e.type === 'ready' && e.publicKey === expected) {
+          clearTimeout(timer);
+          listeners.delete(listener);
+          resolve();
+        } else if (e.type === 'error') {
+          clearTimeout(timer);
+          listeners.delete(listener);
+          reject(new Error(e.message));
+        }
+      };
+      listeners.add(listener);
+    });
+    write({ type: 'init', secret: secretHex });
+    await ready;
+    handle.publicKey = expected;
+  }
+}
+
+let current: { init: (publicKey: string, secretHex: string) => Promise<void> } | null = null;
+
+/** After the identity changed (restored from a phrase): re-key a running worker. */
+export async function rekeyWorker(): Promise<void> {
+  if (!started || !current) return;
+  await started;
+  const me = await loadMe();
+  await current.init(me.identity.peer.publicKey, toHex(me.identity.peer.secretKey));
 }

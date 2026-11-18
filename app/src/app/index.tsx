@@ -7,6 +7,7 @@ import { latestUnfinished, type GameRecord } from '../storage/games';
 import { formatDate } from '../game/format';
 import { ui } from '../theme';
 import { engineAvailable, ENGINE_UNAVAILABLE } from '../engine/arasan';
+import { useOnline } from '../net/online';
 
 type ColorChoice = 'w' | 'b' | 'random';
 
@@ -27,9 +28,20 @@ export default function Home() {
   };
 
   const selected = LEVELS[level - 1];
+  const onlineState = useOnline();
+  const liveOnline = onlineState.phase === 'game' && !onlineState.end ? onlineState : null;
 
   return (
     <ScrollView contentContainerStyle={styles.root}>
+      {liveOnline && (
+        <View style={[styles.card, styles.continueCard]}>
+          <Text style={styles.heading}>Online game in progress</Text>
+          <Text style={styles.subtle}>
+            {liveOnline.tc} vs {liveOnline.opponent.nick}
+          </Text>
+          <PrimaryButton label="Return to game" onPress={() => router.push('/online-game')} />
+        </View>
+      )}
       {unfinished && (
         <View style={[styles.card, styles.continueCard]}>
           <Text style={styles.heading}>Continue game</Text>

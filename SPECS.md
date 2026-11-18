@@ -377,6 +377,8 @@ type Envelope = {
 - On disconnect: both clients keep the game alive for **60 s** (clocks keep running for the side to move). The disconnected side's UI shows a reconnect spinner.
 - Reconnect path: `HyperDHT.connect(opponentKey)` → Nostr fallback. On reconnect, peers exchange `(lastSeq, lastPly, lastHash)` and replay missing messages.
 - After 60 s: the connected player may **claim win by abandonment** (or wait, or offer draw). Unilateral claims are recorded as *unconfirmed* (§7.5).
+- **App restart (implemented):** the running game is saved on the device *before* each new message goes out, so a restored game never reuses a sequence number for different content. Each side keeps every message it sent during the game, and a `SYNC` after reconnecting replays everything after the peer's last delivered seq, including messages that were already acknowledged. So a save taken before a received move doesn't lose that move. Tested by restarting a player from a stale save mid-game (`core/src/net/restore.test.ts`).
+- **Known limitation:** after an outage, the returning side's own view of its clock starts late (it can't tell when the opponent's move was sent), so the opponent's measurement prevails and may be logged as a discrepancy.
 
 ---
 

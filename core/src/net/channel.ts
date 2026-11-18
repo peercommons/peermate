@@ -39,6 +39,20 @@ export type ChannelOptions = {
 
 type Pending = { wire: string; attempts: number; timer: unknown };
 
+/** Everything needed to rebuild a channel after an app restart. */
+export type ChannelSnapshot = {
+  peer: string | undefined;
+  gid: string | undefined;
+  nextSeq: number;
+  delivered: number;
+  /** Reliable messages sent so far, [seq, wire] (unacked ones are resent on restore). */
+  sent: [number, string][];
+  acked: number[];
+};
+
+/** Sent messages kept for replay after the peer restarts (a game is a few hundred). */
+const MAX_SENT_HISTORY = 2000;
+
 export class ReliableChannel {
   peer: string | undefined;
   gid: string | undefined;
@@ -59,6 +73,13 @@ export class ReliableChannel {
   private handler: (msg: Message, env: Envelope) => void = () => undefined;
   /** Called when the peer first acknowledges one of our reliable messages. */
   onAck: ((seq: number) => void) | null = null;
+  /**
+   * Called after a new reliable message is queued and before it is transmitted.
+   * Persist here: a restored channel must never reuse a seq for different content.
+   */
+  onPersist: (() => void) | null = null;
+  /** Every reliable message we sent, for replay to a peer that lost state. */
+  private readonly sent = new Map<number, string>();
 
   constructor(opts: ChannelOptions) {
     this.key = opts.key;
@@ -88,6 +109,9 @@ export class ReliableChannel {
     const wire = encode(seal(this.key, { gid: this.gid, seq, ts: this.timers.now(), body }));
     const pending: Pending = { wire, attempts: 0, timer: null };
     this.outbox.set(seq, pending);
+    this.sent.set(seq, wire);
+    if (this.sent.size > MAX_SENT_HISTORY) this.sent.delete(this.sent.keys().next().value!);
+    this.onPersist?.();
     this.transmitPending(seq, pending);
     return seq;
   }
@@ -123,6 +147,11 @@ export class ReliableChannel {
         return;
       }
       case 'SYNC':
+        // The peer may have restarted from an older save: replay everything after
+        // what it says it has, even messages it acknowledged before.
+        for (const [seq, wire] of this.sent) {
+          if (seq > body.delivered && !this.outbox.has(seq)) this.transmit(wire);
+        }
         this.resendAll();
         return;
       case 'PING':
@@ -177,6 +206,31 @@ export class ReliableChannel {
       p.attempts = 0;
       this.transmitPending(seq, p);
     }
+  }
+
+  snapshot(): ChannelSnapshot {
+    return {
+      peer: this.peer,
+      gid: this.gid,
+      nextSeq: this.nextSeq,
+      delivered: this.delivered,
+      sent: [...this.sent],
+      acked: [...this.sent.keys()].filter((seq) => !this.outbox.has(seq)),
+    };
+  }
+
+  /** Rebuilds a channel saved with snapshot(); call resync() once the transport is up. */
+  static restore(opts: ChannelOptions, snap: ChannelSnapshot): ReliableChannel {
+    const ch = new ReliableChannel({ ...opts, peer: snap.peer });
+    ch.gid = snap.gid;
+    ch.nextSeq = snap.nextSeq;
+    ch.delivered = snap.delivered;
+    const acked = new Set(snap.acked);
+    for (const [seq, wire] of snap.sent) {
+      ch.sent.set(seq, wire);
+      if (!acked.has(seq)) ch.outbox.set(seq, { wire, attempts: 0, timer: null });
+    }
+    return ch;
   }
 
   close(): void {
