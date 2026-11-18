@@ -557,6 +557,8 @@ One device and one carrier: keep collecting results from testers on other carrie
 **Phase 2 field test (18 Nov 2026), first online games in the app:**
 - Desktop bot (home Wi-Fi) vs Galaxy A56 on **5G**: both announced on the lobby topic within seconds, but every connection attempt failed with `HOLEPUNCH_ABORTED`. In Phase 0 the same pairing punched through in 4.7 s, so success depends on the carrier NAT's behaviour at the time. **Quick Match therefore needs the relay fallback (§6.3, §6.6) to be dependable;** it was pulled forward to the next slice.
 - Same pairing with the phone on **home Wi-Fi**: matched in about 1 s and a full game was played (24 plies, tap and drag moves, quick chat both ways, resignation). Both sides agreed on the result, and the game appeared in history and Review.
+- **With the relay fallback (build 14), phone on 5G:** the phone's seek reached the bot through the relays and they matched 3 s later. The whole game was played through relays: the direct connection never punched through, but Hyperswarm kept trying in the background. 12 plies ended in checkmate, with quick chat delivered. Moves arrived in about 1–3 s, including the bot's think time.
+- Desktop-only check: two relay-only bots paired in about 4 s and played 63 plies to a flag claim through public relays, both agreeing on the result.
 
 ### 12.6 Performance targets
 | Metric | Target |
@@ -665,7 +667,7 @@ Sideloading notes:
 |---|---|---|---|
 | **0: Spikes (Android)** | 3 wks | (a) RN + Bare Kit + Hyperswarm on real Android devices; (b) hole-punch success field test; (c) Nostr ephemeral-event support across candidate relays; (d) Arasan TurboModule on device: network-file size, CPU/battery use, and `UCI_Elo` behaviour at low levels; (e) R3F/expo-gl 3D perf prototype; (f) Fastlane `android sideload` lane producing a signed APK on a GitHub Release | Go/no-go per spike; fallback plans (WebRTC instead of HyperDHT; Flutter for 2D-only) decided |
 | **1: Offline core** | 4 wks | Rules, 2D board, vs CPU (10 levels), pass & play, PGN, history, settings, analysis | Levels strictly ordered by self-play calibration (done); human-Elo anchoring moves to beta |
-| **2: Online MVP** (in progress; slice 1, the protocol core, is done) | 6 wks | Identity/backup, Hyperswarm lobby + Nostr fallback, protocol, clocks, reconnect, in-game quick-chat, block/report. **iOS checkpoint:** run spike (a) and a full online game on a real iPhone, including backgrounding behaviour | 100 internal games across networks, < 2% failed games; iOS checkpoint passed |
+| **2: Online MVP** (in progress: protocol core, Hyperswarm play, relay fallback done; iOS checkpoint and polish remaining) | 6 wks | Identity/backup, Hyperswarm lobby + Nostr fallback, protocol, clocks, reconnect, in-game quick-chat, block/report. **iOS checkpoint:** run spike (a) and a full online game on a real iPhone, including backgrounding behaviour | 100 internal games across networks, < 2% failed games; iOS checkpoint passed |
 | **3: Social** | 3 wks | Friends, presence, NIP-17 DMs, challenges, ratings + NIP-64 publishing | n/a |
 | **4: Store readiness** | 2 wks | Developer accounts (start the Play 12-tester / 14-day closed test early), Fastlane `ios` lanes + `match`, store name, metadata, screenshots automation, privacy policy, UGC compliance, accessibility pass, public beta (TestFlight external + Play open testing) | Passes App Review + Play review |
 | **5: v1.1** | 4 wks | 3D board, correspondence games, adaptive CPU, more themes | n/a |
