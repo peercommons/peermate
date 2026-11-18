@@ -5,7 +5,7 @@ import type { Color, EndReason, Outcome } from '@peermate/core';
 
 export type GameRecord = {
   id: string;
-  mode: 'cpu' | 'local';
+  mode: 'cpu' | 'local' | 'online';
   level: number | null;
   player: Color | null;
   white: string;
@@ -139,7 +139,7 @@ export async function latestUnfinished(): Promise<GameRecord | null> {
 function fromRow(r: Row): GameRecord {
   return {
     id: r.id,
-    mode: r.mode === 'cpu' ? 'cpu' : 'local',
+    mode: r.mode === 'cpu' || r.mode === 'online' ? r.mode : 'local',
     level: r.level,
     player: r.player === 'w' || r.player === 'b' ? r.player : null,
     white: r.white,

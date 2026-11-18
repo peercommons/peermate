@@ -6,7 +6,7 @@ import { backupPhrase, deriveIdentity, fingerprint, seedFromPhrase, type Identit
 import { awaitChallenge, challenge, challengerColor, type GameStart, type PairingResult } from './pairing.ts';
 import { GameSession, type SessionEvent } from './session.ts';
 import { LossyLink, seededRandom, VirtualTime, type LinkOptions } from './testing.ts';
-import { parseTimeControl } from './clock.ts';
+import { parseTimeControl, timeControlClass } from './clock.ts';
 
 const seed = (n: number) => new Uint8Array(32).fill(n);
 const alice = deriveIdentity(seed(1));
@@ -287,6 +287,11 @@ test('time control parsing', () => {
   assert.deepEqual(parseTimeControl('0.5+0'), { initialMs: 30_000, incrementMs: 0 });
   assert.throws(() => parseTimeControl('3'));
   assert.throws(() => parseTimeControl('0+0'));
+  assert.equal(timeControlClass('1+0'), 'bullet');
+  assert.equal(timeControlClass('3+2'), 'blitz');
+  assert.equal(timeControlClass('10+0'), 'rapid');
+  assert.equal(timeControlClass('15+10'), 'rapid');
+  assert.equal(timeControlClass('30+20'), 'classical');
 });
 
 // Keep the type import used.

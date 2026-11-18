@@ -14,6 +14,7 @@
     "expo-haptics": "~58.0.8",
     "expo-linking": "~58.0.17",
     "expo-router": "~58.0.32",
+    "expo-secure-store": "~58.0.3",
     "expo-sqlite": "~58.0.18",
     "expo-status-bar": "~58.0.5",
     "expo-system-ui": "~58.0.7",
@@ -41,7 +42,8 @@
     "typecheck": "tsc --noEmit",
     "test:p2p": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=60000 tools/worker.test.mjs tools/online.test.mjs",
     "spike-peer": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/spike-peer.mjs",
-    "nostr-probe": "node tools/nostr-probe.mjs"
+    "nostr-probe": "node tools/nostr-probe.mjs",
+    "play-peer": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/play-peer.mjs"
   },
   "private": true
 }

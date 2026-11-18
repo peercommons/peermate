@@ -13,6 +13,19 @@ export function parseTimeControl(tc: string): TimeControl {
   return { initialMs, incrementMs };
 }
 
+/**
+ * Lobby class for a time control (SPECS §6.2), by expected game length
+ * (initial + 40 moves of increment), the usual convention.
+ */
+export function timeControlClass(tc: string): 'bullet' | 'blitz' | 'rapid' | 'classical' {
+  const { initialMs, incrementMs } = parseTimeControl(tc);
+  const seconds = (initialMs + 40 * incrementMs) / 1000;
+  if (seconds < 180) return 'bullet';
+  if (seconds < 480) return 'blitz';
+  if (seconds < 1500) return 'rapid';
+  return 'classical';
+}
+
 /** Lag compensation credited back to the mover: half the RTT, at most 1 s. */
 export const lagCredit = (rttMs: number | null): number => Math.min(1000, Math.round((rttMs ?? 0) / 2));
 

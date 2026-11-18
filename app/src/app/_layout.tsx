@@ -19,6 +19,8 @@ export default function RootLayout() {
         <Stack.Screen name="review" options={{ title: 'Review' }} />
         <Stack.Screen name="history" options={{ title: 'Your games' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="online" options={{ title: 'Play online' }} />
+        <Stack.Screen name="online-game" options={{ title: 'Online game', gestureEnabled: false }} />
         <Stack.Screen name="dev" options={{ title: 'Dev tools' }} />
       </Stack>
     </SettingsProvider>

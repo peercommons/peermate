@@ -73,3 +73,7 @@ export function fingerprint(publicKeyHex: string): string {
   for (let i = 3; i >= 0; i--) words.push(wordlist[Number((bits >> BigInt(i * 11)) & 2047n)]);
   return words.join('-');
 }
+
+/** Hex helpers for the app (keeps @noble out of its direct dependencies). */
+export const toHex = (bytes: Uint8Array): string => bytesToHex(bytes);
+export const fromHex = (hex: string): Uint8Array => hexToBytes(hex);

@@ -76,7 +76,8 @@ export default function Home() {
 
       <View style={styles.card}>
         <Text style={styles.heading}>Play online</Text>
-        <Text style={styles.subtle}>Peer-to-peer games are coming in Phase 2.</Text>
+        <Text style={styles.subtle}>Find an opponent anywhere. Games run directly between phones, with no server.</Text>
+        <PrimaryButton label="Find an opponent" onPress={() => router.push('/online')} />
       </View>
 
       <View style={styles.links}>
