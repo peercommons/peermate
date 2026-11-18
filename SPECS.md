@@ -602,6 +602,7 @@ One device and one carrier: keep collecting results from testers on other carrie
 **iOS** (`fastlane ios <lane>`)
 | Lane | Steps |
 |---|---|
+| `device` | **Implemented (pre-store).** Builds `native/build-arasan-ios.sh` output if missing → `expo prebuild -p ios --clean` (outside Bundler, so the system CocoaPods runs) → `build_app` with automatic signing, team `QGLA89KHM7`, `export_method: development` → `dist/peermate-X.Y.Z-N.ipa` (N = commit count, as on Android) → `devicectl device install` on the connected iPhone (`install:false` to skip; `PEERMATE_IOS_DEVICE` picks a UDID). For our own registered devices until Phase 4 |
 | `certs` | `match(type: "appstore", readonly: is_ci)`. Certificates/profiles stored encrypted in a **private Git repo** (no server needed) |
 | `build` | `expo prebuild` (if needed) → `cocoapods` → bump build number → `build_app` (gym) → output `.ipa` + dSYMs |
 | `beta` | `certs` → `build` → `upload_to_testflight` (pilot) with changelog from `CHANGELOG.md`; distribute to external group |

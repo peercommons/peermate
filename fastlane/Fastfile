@@ -2,6 +2,8 @@
 #
 #   bundle exec fastlane android sideload              # signed APK in dist/
 #   bundle exec fastlane android sideload publish:true # ...and attach it to a GitHub Release
+#   bundle exec fastlane ios device                    # signed IPA in dist/, installed on the USB iPhone
+#   bundle exec fastlane ios device install:false      # ...build only
 #
 # Secrets come from environment variables, or from fastlane/.env (gitignored;
 # copy fastlane/.env.example). Create the signing key once with
@@ -77,5 +79,75 @@ platform :android do
     end
 
     apk
+  end
+end
+
+# iOS: development-signed builds for our own registered devices (no App Store or
+# TestFlight yet). Signed with the user's team only; see SPECS.md §13.
+IOS_TEAM_ID = 'QGLA89KHM7'
+
+# The first connected physical iPhone, or PEERMATE_IOS_DEVICE (a UDID).
+def ios_device
+  return ENV['PEERMATE_IOS_DEVICE'] unless ENV['PEERMATE_IOS_DEVICE'].to_s.empty?
+
+  out = File.join(Dir.tmpdir, "peermate-devices-#{Process.pid}.json")
+  sh("xcrun devicectl list devices --json-output #{out} >/dev/null", log: false)
+  devices = JSON.parse(File.read(out)).dig('result', 'devices') || []
+  File.delete(out)
+  phone = devices.find do |d|
+    d.dig('hardwareProperties', 'platform') == 'iOS' &&
+      d.dig('hardwareProperties', 'reality') == 'physical' &&
+      d.dig('connectionProperties', 'pairingState') == 'paired' &&
+      d.dig('connectionProperties', 'tunnelState') == 'connected'
+  end
+  UI.user_error!('No connected iPhone found (plug it in and unlock it, or set PEERMATE_IOS_DEVICE)') unless phone
+  phone.dig('hardwareProperties', 'udid')
+end
+
+platform :ios do
+  desc 'Build a development-signed release IPA and install it on the connected iPhone'
+  lane :device do |options|
+    version = marketing_version
+    code = options[:version_code] ? Integer(options[:version_code]) : next_version_code
+    ENV['PEERMATE_VERSION_CODE'] = code.to_s # read by app/app.config.js
+
+    # The in-process engine (gitignored build output).
+    engine = File.join(APP_DIR, 'modules/arasan-engine/ios/libarasan.a')
+    sh(File.expand_path('../native/build-arasan-ios.sh', __dir__)) unless File.exist?(engine)
+
+    # Regenerate the native project from app.json (Continuous Native Generation).
+    # Outside Bundler, so `pod install` uses the system CocoaPods (it isn't in our
+    # Gemfile). Prebuild rewrites app/tsconfig.json; put it back.
+    Bundler.with_unbundled_env do
+      # (It also resets ENV, so the build number is passed explicitly.)
+      sh("cd #{APP_DIR} && CI=1 PEERMATE_VERSION_CODE=#{code} npx expo prebuild -p ios --clean && git checkout tsconfig.json")
+    end
+
+    FileUtils.mkdir_p(DIST_DIR)
+    name = "peermate-#{version}-#{code}.ipa"
+    build_app(
+      workspace: File.join(APP_DIR, 'ios/Peermate.xcworkspace'),
+      scheme: 'Peermate',
+      configuration: 'Release',
+      export_method: 'development',
+      export_team_id: IOS_TEAM_ID,
+      xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{IOS_TEAM_ID}",
+      export_xcargs: '-allowProvisioningUpdates',
+      derived_data_path: File.join(APP_DIR, 'ios/build'),
+      output_directory: DIST_DIR,
+      output_name: name,
+      skip_profile_detection: true,
+      include_symbols: false
+    )
+    ipa = File.join(DIST_DIR, name)
+    UI.success("IPA ready: #{ipa}")
+
+    unless options[:install] == false
+      udid = ios_device
+      sh('xcrun', 'devicectl', 'device', 'install', 'app', '--device', udid, ipa)
+      UI.success("Installed on #{udid}")
+    end
+
+    ipa
   end
 end
