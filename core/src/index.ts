@@ -8,3 +8,4 @@ export * from './net/channel.ts';
 export * from './net/clock.ts';
 export * from './net/pairing.ts';
 export * from './net/session.ts';
+export * from './net/matchmaker.ts';

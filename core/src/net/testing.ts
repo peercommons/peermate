@@ -56,10 +56,22 @@ export type LinkOptions = {
   random?: () => number;
 };
 
-/** A one-way pipe with loss, duplication and random delay. `up` toggles an outage. */
+/**
+ * A one-way pipe with loss, duplication and random delay. Setting `up = false`
+ * is an outage: nothing is sent, and messages already in flight are lost (as
+ * with a real connection that closes).
+ */
 export class LossyLink {
-  up = true;
   sent = 0;
+  private epoch = 0;
+  private isUp = true;
+  get up() {
+    return this.isUp;
+  }
+  set up(value: boolean) {
+    if (!value) this.epoch++;
+    this.isUp = value;
+  }
   private readonly time: VirtualTime;
   private readonly deliver: (wire: string) => void;
   private readonly opts: LinkOptions;
@@ -75,8 +87,11 @@ export class LossyLink {
     if (!this.up || r() < (this.opts.loss ?? 0)) return;
     const copies = r() < (this.opts.duplicate ?? 0) ? 2 : 1;
     const [lo, hi] = this.opts.delayMs ?? [20, 20];
+    const epoch = this.epoch;
     for (let i = 0; i < copies; i++) {
-      this.time.setTimeout(() => this.deliver(wire), Math.round(lo + r() * (hi - lo)));
+      this.time.setTimeout(() => {
+        if (this.isUp && this.epoch === epoch) this.deliver(wire);
+      }, Math.round(lo + r() * (hi - lo)));
     }
   };
 }

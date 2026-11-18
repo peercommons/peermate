@@ -39,7 +39,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
-    "test:p2p": "node --test --test-timeout=60000 tools/worker.test.mjs",
+    "test:p2p": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=60000 tools/worker.test.mjs tools/online.test.mjs",
     "spike-peer": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/spike-peer.mjs",
     "nostr-probe": "node tools/nostr-probe.mjs"
   },
