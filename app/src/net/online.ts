@@ -57,6 +57,9 @@ export type OnlineState =
     }
   | { phase: 'error'; message: string };
 
+/** Lifecycle log, readable over USB with `adb logcat -s ReactNativeJS` (field testing). */
+const log = (...args: unknown[]) => console.info('[online]', ...args);
+
 /** A running online game, saved as it's played so it survives an app restart. */
 const ACTIVE_KEY = 'online.active.v1';
 type SavedGame = {
@@ -112,6 +115,7 @@ class OnlineController {
   }
 
   async seek(tc: string): Promise<void> {
+    log('seek', tc, 'from state', this.state.phase);
     if (this.state.phase === 'starting' || this.state.phase === 'seeking') return;
     if (this.state.phase === 'game' && !this.state.end) return;
     this.leave();
@@ -202,8 +206,8 @@ class OnlineController {
     };
     try {
       Storage.setItemSync(ACTIVE_KEY, JSON.stringify(saved));
-    } catch {
-      // Storage full or unavailable: the game goes on, it just can't be resumed.
+    } catch (err) {
+      log('save failed:', String(err)); // the game goes on, it just can't be resumed
     }
   }
 
@@ -230,6 +234,7 @@ class OnlineController {
    * running meanwhile; the opponent replays anything we missed.
    */
   async resumeSaved(): Promise<boolean> {
+    log('resume: state', this.state.phase);
     if (this.state.phase !== 'idle') return this.state.phase === 'game';
     let saved: SavedGame;
     try {
@@ -275,8 +280,10 @@ class OnlineController {
       });
       worker.send({ type: 'connect', peer: opp.key }); // try for a direct link
       channel.resync();
+      log('resumed vs', opp.nick, 'at ply', this.session.ply, 'relay', Boolean(opp.npub));
       return true;
     } catch (err) {
+      log('resume failed:', String(err));
       this.clearSaved();
       this.set({ phase: 'error', message: `Couldn't resume the game: ${(err as Error).message}` });
       return false;
@@ -301,6 +308,7 @@ class OnlineController {
     const route = this.router?.route(this.match.opponent.key) ?? null;
     const connection: Connection = route === 'direct' ? 'direct' : route === 'relay' ? 'relayed' : 'reconnecting';
     if (connection !== this.state.connection) {
+      log('route', this.state.connection, '->', connection);
       this.match.channel.resync(); // replay anything lost in the switch
       this.patchGame({ connection });
     }
@@ -370,6 +378,7 @@ class OnlineController {
 
   private onMatch(m: Match, tc: string) {
     this.match = m;
+    log('matched', m.opponent.nick, 'as', m.game.myColor, 'via', this.router?.route(m.opponent.key));
     this.worker?.send({ type: 'unseek' });
     this.relay?.unseek();
     // The npub in the signed HELLO lets us reach the opponent through relays
@@ -421,6 +430,7 @@ class OnlineController {
         if (e.count >= 3) this.patchGame({ notice: "Opponent's reported clock keeps disagreeing with ours" });
         return;
       case 'ended':
+        log('ended', JSON.stringify(e.end), 'at ply', this.session?.ply);
         this.clearSaved();
         this.patchGame({ end: e.end, drawOffered: false, notice: null });
         void this.saveFinished(e.end);
