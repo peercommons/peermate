@@ -76,6 +76,21 @@ const ACTIVE_KEY = 'online.active.v1';
  */
 const STALE_DIRECT_MS = 12_000;
 const LINK_CHECK_MS = 2_000;
+/** How long the transports stay up after leaving a game, for its last messages to be acknowledged. */
+const LINGER_MS = 15_000;
+
+/** Resolves true once `channel` has nothing unacknowledged, false after `ms`. */
+function drained(channel: { unacked: number }, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const until = Date.now() + ms;
+    const tick = () => {
+      if (channel.unacked === 0) resolve(true);
+      else if (Date.now() >= until) resolve(false);
+      else setTimeout(tick, 250);
+    };
+    tick();
+  });
+}
 const RECONNECTING = 'Reconnecting to your game…';
 type SavedGame = {
   v: 1;
@@ -109,6 +124,7 @@ class OnlineController {
   private router: PeerRouter | null = null;
   private startedAt = 0;
   private resuming: Promise<boolean> | null = null;
+  private lingering: Promise<void> | null = null;
   /** When the current direct link to the opponent came up (grace period for the stale check). */
   private directSince = 0;
 
@@ -141,6 +157,7 @@ class OnlineController {
 
   async seek(tc: string): Promise<void> {
     log('seek', tc, 'from state', this.state.phase);
+    if (this.lingering) await this.lingering; // the previous game's last messages first
     // A saved game is being picked up (app just started): it wins over a new seek.
     if (this.resuming && (await this.resuming)) return;
     if (this.state.phase === 'starting' || this.state.phase === 'seeking') return;
@@ -180,6 +197,25 @@ class OnlineController {
   /** Leaves a finished game (or abandons the screen state after an error). */
   leave(): void {
     if (this.state.phase === 'game' && !this.state.end) return; // resign or abort first
+    // The game's last messages (final move, resignation, draw acceptance) may not
+    // have reached the opponent yet. Keep the transports up until they're
+    // acknowledged, or the opponent is left with a game that never ends.
+    const channel = this.match?.channel;
+    if (channel && channel.unacked > 0 && !this.lingering) {
+      log('leaving with', channel.unacked, 'unacknowledged; lingering');
+      this.lingering = drained(channel, LINGER_MS).then((ok) => {
+        log('linger', ok ? 'drained' : 'timed out');
+        this.lingering = null;
+        this.teardown();
+      });
+      if (this.state.phase !== 'idle') this.set({ phase: 'idle' });
+      return;
+    }
+    if (this.lingering) return; // teardown follows the linger
+    this.teardown();
+  }
+
+  private teardown(): void {
     this.session?.dispose();
     this.session = null;
     if (this.match) {
@@ -460,7 +496,9 @@ class OnlineController {
             this.worker?.send({ type: 'connect', peer: e.id }); // keep trying direct
             this.routeChanged();
           }
-        } else {
+        } else if (this.router?.route(e.id) == null) {
+          // Gone for good only if the relays can't reach them either; a lost
+          // direct link mid-pairing mustn't throw the handshake away.
           this.lobbyPeers.delete(e.id);
           mm?.peerLeft(e.id);
           if (this.state.phase === 'seeking') this.set({ ...this.state, lobbyPeers: this.lobbyPeers.size });

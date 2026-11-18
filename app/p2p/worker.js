@@ -69,7 +69,10 @@ function lineReader(onMessage, maxLine = MAX_FRAME * 2) {
 const encode = (msg) => b4a.from(JSON.stringify(msg) + '\n')
 
 module.exports = async function start(ipc, ready, opts = {}) {
-  const peers = new Map() // public key hex -> connection
+  const peers = new Map() // public key hex -> connection we write to (the newest live one)
+  const conns = new Map() // public key hex -> Set of live connections
+  const leaving = new Map() // public key hex -> timer for a peer-left not yet reported
+  const LEAVE_GRACE_MS = 1500 // a duplicate can close just before its replacement arrives
   const lobby = new Map() // room -> discovery
   let swarm = null
   let spikeDiscovery = null
@@ -80,11 +83,22 @@ module.exports = async function start(ipc, ready, opts = {}) {
 
   function onConnection(conn) {
     const id = b4a.toString(conn.remotePublicKey, 'hex')
-    const previous = peers.get(id)
+    // When both sides dial at once there are briefly two connections. Hyperswarm
+    // closes the duplicate itself; closing one here too could close both and
+    // set off another round of dialling. So: track every live one, write to the
+    // newest, and the peer has left only when the last one closes.
+    let live = conns.get(id)
+    if (!live) conns.set(id, (live = new Set()))
+    const handover = leaving.has(id)
+    if (handover) {
+      clearTimeout(leaving.get(id))
+      leaving.delete(id)
+    }
+    const wasConnected = live.size > 0 || handover
+    live.add(conn)
     peers.set(id, conn)
-    if (previous && previous !== conn) previous.destroy()
 
-    send({
+    if (!wasConnected) send({
       type: 'peer-joined',
       id,
       host: conn.rawStream?.remoteHost ?? null,
@@ -110,9 +124,22 @@ module.exports = async function start(ipc, ready, opts = {}) {
 
     conn.on('error', (err) => log(`connection ${id.slice(0, 8)} error: ${err.message}`))
     conn.on('close', () => {
-      if (peers.get(id) !== conn) return // replaced by a newer connection
+      if (conns.get(id) !== live) return // from a swarm since replaced (re-init)
+      live.delete(conn)
+      if (live.size > 0) {
+        if (peers.get(id) === conn) peers.set(id, [...live].pop()) // fall back to another live one
+        return
+      }
       peers.delete(id)
-      send({ type: 'peer-left', id })
+      leaving.set(
+        id,
+        setTimeout(() => {
+          leaving.delete(id)
+          if (live.size > 0 || conns.get(id) !== live) return
+          conns.delete(id)
+          send({ type: 'peer-left', id })
+        }, LEAVE_GRACE_MS)
+      )
     })
   }
 
@@ -123,6 +150,9 @@ module.exports = async function start(ipc, ready, opts = {}) {
       lobby.clear()
       spikeDiscovery = null
       peers.clear()
+      conns.clear()
+      for (const t of leaving.values()) clearTimeout(t)
+      leaving.clear()
       await old.destroy()
     }
     swarm = new Hyperswarm({ ...opts.swarm, ...(keyPair ? { keyPair } : {}), maxPeers: 24 })
@@ -174,7 +204,14 @@ module.exports = async function start(ipc, ready, opts = {}) {
       case 'drop': {
         const key = b4a.from(String(msg.peer), 'hex')
         swarm.leavePeer(key)
-        peers.get(msg.peer)?.destroy()
+        // An explicit drop is immediate (no grace): the next connection is new.
+        const live = conns.get(msg.peer)
+        conns.delete(msg.peer)
+        peers.delete(msg.peer)
+        clearTimeout(leaving.get(msg.peer))
+        leaving.delete(msg.peer)
+        for (const conn of live ?? []) conn.destroy()
+        if (live?.size) send({ type: 'peer-left', id: msg.peer })
         break
       }
 

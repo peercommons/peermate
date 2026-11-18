@@ -59,9 +59,18 @@ export class Matchmaker {
     this.timers = opts.timers ?? realTimers;
   }
 
-  /** Lobby peer connected (either side may have dialed). */
+  /**
+   * Lobby peer connected (either side may have dialed), or reached over another
+   * transport. A peer we already know keeps its channel and handshake: only a
+   * resync, so a transport switch mid-pairing can't restart it.
+   */
   peerConnected(peer: string): void {
-    if (this.closed || this.matched || peer === this.me || this.peers.has(peer)) return;
+    if (this.closed || this.matched || peer === this.me) return;
+    const known = this.peers.get(peer);
+    if (known) {
+      known.channel.resync();
+      return;
+    }
     const channel = new ReliableChannel({
       key: this.opts.identity.peer,
       peer,
@@ -93,6 +102,7 @@ export class Matchmaker {
     else this.peers.get(peer)?.channel.receive(wire);
   }
 
+  /** The peer is unreachable on every transport (not just one link lost). */
   peerLeft(peer: string): void {
     const state = this.peers.get(peer);
     if (!state || this.matched?.opponent.key === peer) return;

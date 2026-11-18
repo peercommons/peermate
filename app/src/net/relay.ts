@@ -22,6 +22,15 @@ export const DEFAULT_RELAYS = ['wss://relay.snort.social', 'wss://relay.damus.io
 const SEEK_REPEAT_MS = 20_000;
 const RESUBSCRIBE_MIN_MS = 2_000;
 const RESUBSCRIBE_MAX_MS = 30_000;
+/**
+ * A subscription that hasn't echoed one of our own events for this long is
+ * presumed dead and reopened on fresh connections. nostr-tools can leave a
+ * subscription open but deaf when a background reconnect hangs.
+ */
+const STALE_SUBSCRIPTION_MS = 60_000;
+const HEALTH_CHECK_MS = 15_000;
+/** Our inbox gets a tiny event from ourselves this often, as a liveness probe. */
+const PROBE_MS = 20_000;
 /** Seeks older than this are ignored (strfry relays replay ephemeral events for minutes). */
 const SEEK_MAX_AGE_S = 45;
 const MAX_SEEN = 2000;
@@ -51,6 +60,7 @@ export class RelayNet {
   private readonly opts: RelayOptions;
   private inbox: { close(): void } | null = null;
   private seeking: { sub: { close(): void }; timer: ReturnType<typeof setInterval> } | null = null;
+  private probeTimer: ReturnType<typeof setInterval> | null = null;
   private closed = false;
 
   constructor(opts: RelayOptions) {
@@ -59,9 +69,13 @@ export class RelayNet {
     this.npub = getPublicKey(this.sk);
     this.relays = opts.relays ?? DEFAULT_RELAYS;
     this.inbox = this.resilient(
+      'inbox',
       () => ({ kinds: [PEERMATE_KIND], '#p': [this.npub], since: Math.floor(Date.now() / 1000) - 10 }),
       (e) => this.onDirect(e),
     );
+    const probe = () => this.publish([['p', this.npub]], nip44.encrypt('probe', this.conversationKey(this.npub)));
+    probe();
+    this.probeTimer = setInterval(probe, PROBE_MS);
   }
 
   /**
@@ -70,6 +84,7 @@ export class RelayNet {
    * would leave us deaf while our publishes still go out.
    */
   private resilient(
+    name: string,
     filter: () => Record<string, unknown>,
     onevent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number }) => void,
   ): { close(): void } {
@@ -77,16 +92,33 @@ export class RelayNet {
     let delay = RESUBSCRIBE_MIN_MS;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let sub: { close(): void } | null = null;
+    let generation = 0; // which open() is current; an older subscription's close is ignored
+    // Our own events (inbox probes, our seeks) come back on a live subscription.
+    let lastOwn = Date.now();
+    const health = setInterval(() => {
+      if (stopped || this.closed || Date.now() - lastOwn < STALE_SUBSCRIPTION_MS) return;
+      this.opts.onLog?.(`relay ${name} subscription deaf for ${Math.round((Date.now() - lastOwn) / 1000)} s; reconnecting`);
+      lastOwn = Date.now();
+      const old = sub;
+      sub = null;
+      generation++; // its close must not schedule a second reopen
+      old?.close();
+      this.pool.close(this.relays); // fresh connections: a hung reconnect never recovers
+      if (timer) clearTimeout(timer);
+      open();
+    }, HEALTH_CHECK_MS);
     const open = () => {
       if (stopped || this.closed) return;
       const opened = Date.now();
+      const mine = ++generation;
       sub = this.pool.subscribeMany(this.relays, filter() as never, {
         onevent: (e) => {
           delay = RESUBSCRIBE_MIN_MS;
+          if (e.pubkey === this.npub) lastOwn = Date.now();
           onevent(e);
         },
         onclose: () => {
-          if (stopped || this.closed) return;
+          if (stopped || this.closed || generation !== mine) return; // replaced by a newer one
           // Back off only if it failed quickly (couldn't connect at all).
           delay = Date.now() - opened > 60_000 ? RESUBSCRIBE_MIN_MS : Math.min(RESUBSCRIBE_MAX_MS, delay * 2);
           this.opts.onLog?.(`relay subscription closed; retrying in ${Math.round(delay / 1000)} s`);
@@ -98,6 +130,7 @@ export class RelayNet {
     return {
       close: () => {
         stopped = true;
+        clearInterval(health);
         if (timer) clearTimeout(timer);
         sub?.close();
       },
@@ -163,6 +196,7 @@ export class RelayNet {
       }
     };
     const sub = this.resilient(
+      'seek',
       () => ({ kinds: [PEERMATE_KIND], '#t': tags, since: Math.floor(Date.now() / 1000) - SEEK_MAX_AGE_S }),
       (e) => {
         if (e.pubkey === this.npub || !this.firstSighting(e.id)) return;
@@ -194,6 +228,7 @@ export class RelayNet {
   close(): void {
     this.unseek();
     this.closed = true;
+    if (this.probeTimer) clearInterval(this.probeTimer);
     this.inbox?.close();
     this.pool.destroy();
   }

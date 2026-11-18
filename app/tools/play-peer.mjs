@@ -116,7 +116,7 @@ if (!relayOnly) {
             host.send({ type: 'connect', peer: msg.id })
             match.channel.resync()
             routeNote()
-          } else mm?.peerLeft(msg.id)
+          } else if (router.route(msg.id) == null) mm?.peerLeft(msg.id) // still reachable by relay: keep the handshake
           break
         case 'error':
           log('worker error:', msg.message)
@@ -214,6 +214,11 @@ async function shutdown(code) {
     session.canAbort ? session.abort() : session.resign()
     await new Promise((r) => setTimeout(r, 2500))
   }
+  // Don't leave before the last messages (final move, draw acceptance, resignation)
+  // are acknowledged, or the opponent's game never ends (as the app does).
+  const until = Date.now() + 30_000
+  while (match && match.channel.unacked > 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 250))
+  if (match?.channel.unacked) log(`leaving with ${match.channel.unacked} unacknowledged message(s)`)
   session?.dispose()
   relay.close()
   await host?.stop()
