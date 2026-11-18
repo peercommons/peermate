@@ -62,6 +62,7 @@ const log = (...args: unknown[]) => console.info('[online]', ...args);
 
 /** A running online game, saved as it's played so it survives an app restart. */
 const ACTIVE_KEY = 'online.active.v1';
+const RECONNECTING = 'Reconnecting to your game…';
 type SavedGame = {
   v: 1;
   tc: string;
@@ -194,7 +195,14 @@ class OnlineController {
 
   /** Feeds a message from `peer` to the running game or the matchmaker. */
   private deliver(peer: string, wire: string) {
-    if (this.isOpponent(peer)) this.match!.channel.receive(wire);
+    if (this.isOpponent(peer)) {
+      this.match!.channel.receive(wire);
+      // First word from the opponent after a resume: we're back in touch.
+      if (this.state.phase === 'game' && this.state.notice === RECONNECTING) {
+        log('resume: opponent heard');
+        this.patchGame({ notice: null });
+      }
+    }
     else this.matchmaker?.peerData(peer, wire);
   }
 
@@ -296,7 +304,7 @@ class OnlineController {
         connection: opp.npub ? 'relayed' : 'reconnecting',
         end: null,
         drawOffered: false,
-        notice: 'Reconnecting to your game…',
+        notice: RECONNECTING,
         chat: [],
         version: 0,
       });
