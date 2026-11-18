@@ -78,8 +78,8 @@ export default function OnlineLobby() {
               {state.phase === 'seeking' && (
                 <Text style={styles.subtle}>
                   {state.lobbyPeers === 0
-                    ? 'No one else in the lobby yet'
-                    : `${state.lobbyPeers} player${state.lobbyPeers === 1 ? '' : 's'} in the lobby`}
+                    ? 'Waiting for another player to connect'
+                    : `Connected to ${state.lobbyPeers} player${state.lobbyPeers === 1 ? '' : 's'}`}
                 </Text>
               )}
               <Secondary label="Cancel" onPress={() => online.cancelSeek()} />

@@ -49,6 +49,7 @@ const host = await startHost({
         break
       case 'peer-left':
         if (match?.opponent.key === msg.id) {
+          if (session?.end) break
           log('opponent connection dropped; redialing')
           host.send({ type: 'connect', peer: msg.id })
         } else mm?.peerLeft(msg.id)

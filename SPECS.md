@@ -554,6 +554,10 @@ Measure real-world **hole-punch success rate** across Wi-Fi/4G/5G/carrier CGNAT 
 
 One device and one carrier: keep collecting results from testers on other carriers and countries toward the ≥ 70% direct-connection target.
 
+**Phase 2 field test (18 Nov 2026), first online games in the app:**
+- Desktop bot (home Wi-Fi) vs Galaxy A56 on **5G**: both announced on the lobby topic within seconds, but every connection attempt failed with `HOLEPUNCH_ABORTED`. In Phase 0 the same pairing punched through in 4.7 s, so success depends on the carrier NAT's behaviour at the time. **Quick Match therefore needs the relay fallback (§6.3, §6.6) to be dependable;** it was pulled forward to the next slice.
+- Same pairing with the phone on **home Wi-Fi**: matched in about 1 s and a full game was played (24 plies, tap and drag moves, quick chat both ways, resignation). Both sides agreed on the result, and the game appeared in history and Review.
+
 ### 12.6 Performance targets
 | Metric | Target |
 |---|---|
