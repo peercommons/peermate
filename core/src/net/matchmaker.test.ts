@@ -8,7 +8,8 @@ import { LossyLink, seededRandom, VirtualTime, type LinkOptions } from './testin
 type Player = { id: Identity; mm: Matchmaker; match: Match | null; dropped: Set<string> };
 
 /** Everyone in `tcs` joins one lobby; every pair connects (like a small swarm). */
-function lobby(tcs: string[], link: LinkOptions = { delayMs: [20, 120] }, seed = 1) {
+/** `blocks`: [i, j] pairs where player i has blocked player j. */
+function lobby(tcs: string[], link: LinkOptions = { delayMs: [20, 120] }, seed = 1, blocks: [number, number][] = []) {
   const time = new VirtualTime();
   const rnd = seededRandom(seed);
   const players: Player[] = [];
@@ -53,6 +54,7 @@ function lobby(tcs: string[], link: LinkOptions = { delayMs: [20, 120] }, seed =
         },
       },
       onMatch: (m) => (p.match = m),
+      isBlocked: (peer) => blocks.some(([x, y]) => x === i && players[y]?.id.peer.publicKey === peer),
       onLog: process.env.MMLOG ? (m) => console.log(time.now(), `P${i}`, m) : undefined,
     });
     players.push(p);
@@ -121,6 +123,19 @@ test('matchmaker: odd one out keeps waiting; different time controls never pair'
 
   r = lobby(['3+2', '10+0']);
   assert.equal(r.players.filter((p) => p.match).length, 0);
+});
+
+test('matchmaker: a blocked player is never paired, even if they are the only one around', () => {
+  // P0 blocked P1 (one side is enough). P2 joins too, so P0 can still find a game.
+  let r = lobby(['5+0', '5+0'], undefined, 1, [[0, 1]]);
+  assert.equal(r.players.filter((p) => p.match).length, 0);
+
+  r = lobby(['5+0', '5+0', '5+0'], undefined, 1, [[0, 1]]);
+  checkPairs(r.players, r.byKey);
+  const [p0, p1, p2] = r.players;
+  assert.notEqual(p0.match?.opponent.key, p1.id.peer.publicKey);
+  assert.notEqual(p1.match?.opponent.key, p0.id.peer.publicKey);
+  assert.ok(p2.match, 'the unblocked player found a game');
 });
 
 test('matchmaker: a peer that vanishes mid-handshake does not block matching', () => {

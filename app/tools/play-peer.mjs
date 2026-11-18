@@ -9,7 +9,7 @@
 // hole-punching had failed. --room seeks in a private room instead of the public
 // lobby (the soak test runs each game in its own). --think sets the average think
 // time; --max-plies offers a draw (which the opponent bot accepts) after that
-// many plies. When the game ends it prints one `RESULT {json}` line and exits.
+// many plies. --seed HEX (32 bytes) keeps the same identity across runs. When the game ends it prints one `RESULT {json}` line and exits.
 // Ctrl-C quits (aborts or resigns a running game).
 import { useWebSocketImplementation } from 'nostr-tools/pool'
 import { NodeWebSocket } from './ws.mjs'
@@ -39,9 +39,10 @@ const relayOnly = args.includes('--relay-only')
 const room = option('--room')
 const thinkMs = Number(option('--think') ?? 2000)
 const maxPlies = Number(option('--max-plies') ?? Infinity)
-const valued = new Set(['--room', '--think', '--max-plies'].flatMap((n) => [option(n)]))
+const seedHex = option('--seed') // 64 hex chars: a fixed identity across runs (e.g. to test blocking)
+const valued = new Set(['--room', '--think', '--max-plies', '--seed'].flatMap((n) => [option(n)]))
 const tc = args.find((a) => !a.startsWith('--') && !valued.has(a)) ?? '5+0'
-const identity = deriveIdentity(newSeed())
+const identity = deriveIdentity(seedHex ? Buffer.from(seedHex, 'hex') : newSeed())
 const nick = relayOnly ? 'Relay bot' : 'Desktop bot'
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 const rooms = [room ?? lobbyRoom(timeControlClass(tc), 'any')]

@@ -29,8 +29,10 @@ import {
   ReliableChannel,
   type SessionEvent,
   type SessionSnapshot,
+  buildReport,
 } from '@peermate/core';
 import { saveGame } from '../storage/games';
+import { block, isBlocked } from './blocklist';
 import { loadMe, type Me } from './profile';
 import { RelayNet, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
@@ -175,6 +177,7 @@ class OnlineController {
         tc,
         network: router,
         onMatch: (m) => this.onMatch(m, tc),
+        isBlocked,
       });
       const rooms = [lobbyRoom(timeControlClass(tc), 'any')];
       worker.send({ type: 'seek', rooms });
@@ -399,6 +402,37 @@ class OnlineController {
     return this.match?.opponent.key === peer;
   }
 
+  /** Blocks the current opponent; a running game is aborted or resigned first. */
+  blockOpponent(): void {
+    if (this.state.phase !== 'game' || !this.session) return;
+    if (!this.state.end) {
+      if (this.session.canAbort) this.abort();
+      else this.resign();
+    }
+    log('blocked opponent');
+    block(this.state.opponent.key, this.state.opponent.nick);
+  }
+
+  /** A signed report on the current opponent (SPECS §14.2), for the share sheet. Also blocks them. */
+  async reportOpponent(reason?: string): Promise<string | null> {
+    if (this.state.phase !== 'game' || !this.session) return null;
+    const { opponent, tc, chat } = this.state;
+    const moves = this.session.chess.history();
+    const gameId = this.gameId;
+    const me = await loadMe();
+    this.blockOpponent();
+    return buildReport(me.identity, {
+      reporter: { nick: me.profile.nick },
+      opponent: { key: opponent.key, nick: opponent.nick },
+      gameId,
+      timeControl: tc,
+      moves,
+      chat,
+      reason,
+      at: Date.now(),
+    });
+  }
+
   private gameRunning(): boolean {
     return this.state.phase === 'game' && !this.state.end && !!this.match && !!this.session;
   }
@@ -451,6 +485,7 @@ class OnlineController {
   /** Another player's seek on the relays. */
   private onRelaySeek(seek: Seek) {
     if (this.state.phase !== 'seeking' || seek.tc !== this.state.tc || !this.router) return;
+    if (isBlocked(seek.peer)) return;
     // Seeks are unsigned: never let one overwrite a route we already have.
     if (!this.router.npubOf(seek.peer)) this.router.relayKnown(seek.peer, seek.npub);
     this.worker?.send({ type: 'connect', peer: seek.peer }); // try for a direct link too
@@ -544,6 +579,9 @@ class OnlineController {
         this.patchGame({ drawOffered: false, notice: null });
         return;
       case 'chat': {
+        // Strangers get quick chat only (SPECS §14.2): an opponent's free text,
+        // which our app never sends, isn't shown.
+        if (e.from === 'opponent' && e.text !== undefined) return;
         const text = e.text ?? QUICK_TEXT[e.quick ?? ''] ?? '';
         if (text) this.patchGame({ chat: [...this.state.chat, { from: e.from, text, at: Date.now() }].slice(-50) });
         return;

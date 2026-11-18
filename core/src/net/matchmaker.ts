@@ -35,6 +35,8 @@ export type MatchmakerOptions = {
   timers?: Timers;
   onMatch: (m: Match) => void;
   onLog?: (message: string) => void;
+  /** Players the user blocked: never paired, dropped on sight (SPECS §14.2). */
+  isBlocked?: (peer: string) => boolean;
 };
 
 /** A pairing handshake that hasn't finished by now is abandoned (peer vanished). */
@@ -66,6 +68,11 @@ export class Matchmaker {
    */
   peerConnected(peer: string): void {
     if (this.closed || this.matched || peer === this.me) return;
+    if (this.opts.isBlocked?.(peer)) {
+      this.log(`${peer.slice(0, 8)}: blocked, dropping`);
+      this.opts.network.drop(peer);
+      return;
+    }
     const known = this.peers.get(peer);
     if (known) {
       known.channel.resync();

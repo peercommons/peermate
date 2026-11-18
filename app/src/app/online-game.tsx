@@ -1,7 +1,7 @@
 // Online game screen (SPECS §2.4, §6, §8.1). Reads the running GameSession from
 // the online controller; moves go out over the P2P connection.
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
 import * as Haptics from 'expo-haptics';
@@ -20,6 +20,7 @@ import { Board } from '../components/Board';
 import { PromotionPicker } from '../components/PromotionPicker';
 import { formatMoves } from '../game/format';
 import { online, QUICK_TEXT, RELAYED_BULLET_WARNING, useOnline, type Connection } from '../net/online';
+import { useBlocked } from '../net/blocklist';
 import { useSettings } from '../settings';
 import { BOARD_THEMES, ui } from '../theme';
 
@@ -37,6 +38,7 @@ function formatClock(ms: number): string {
 export default function OnlineGameScreen() {
   const state = useOnline();
   const session = online.session;
+  const blockedList = useBlocked();
   const { settings } = useSettings();
   const { width } = useWindowDimensions();
   const boardSize = Math.min(width - 16, 560);
@@ -115,6 +117,24 @@ export default function OnlineGameScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: title, style: 'destructive', onPress: action },
     ]);
+
+  const blocked = blockedList.some((b) => b.key === state.opponent.key);
+  const report = async () => {
+    const text = await online.reportOpponent();
+    if (text) await Share.share({ title: 'Peermate report', message: text });
+  };
+  const blockOrReport = () =>
+    Alert.alert(
+      state.opponent.nick,
+      blocked
+        ? `${state.opponent.nick} is blocked. A report is a signed copy of this game and chat, for you to send to whoever should see it.`
+        : `Block: you'll never be paired with ${state.opponent.nick} again${state.end ? '' : ', and you resign this game'}.\n\nReport: blocks them too, and prepares a signed copy of this game and chat for you to send.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        ...(blocked ? [] : [{ text: 'Block', style: 'destructive' as const, onPress: () => online.blockOpponent() }]),
+        { text: 'Report', style: 'destructive' as const, onPress: () => void report() },
+      ],
+    );
 
   let status: string;
   if (state.end) {
@@ -261,6 +281,12 @@ export default function OnlineGameScreen() {
         )}
       </View>
 
+      <Pressable onPress={blockOrReport} accessibilityRole="button" style={styles.reportLink}>
+        <Text style={styles.reportText}>
+          {blocked ? `${state.opponent.nick} is blocked · Report` : `Block or report ${state.opponent.nick}`}
+        </Text>
+      </Pressable>
+
       <PromotionPicker
         color={promotion ? me : null}
         onChoose={(p) => {
@@ -334,6 +360,8 @@ const styles = StyleSheet.create({
   final: { fontWeight: '700', color: ui.accent },
   notice: { textAlign: 'center', color: ui.mistake, fontWeight: '600' },
   subtle: { textAlign: 'center', color: ui.subtle, paddingHorizontal: 8 },
+  reportLink: { alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 12 },
+  reportText: { color: ui.subtle, fontSize: 12, textDecorationLine: 'underline' },
   panel: { flex: 1, backgroundColor: ui.card, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: ui.border },
   panelContent: { padding: 10, gap: 4 },
   moves: { fontSize: 14, lineHeight: 22, color: ui.text },

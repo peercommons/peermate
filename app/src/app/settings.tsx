@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { cleanNick, getBackupPhrase, loadMe, NICK_MAX, restoreFromPhrase, setNick, type Me } from '../net/profile';
+import { unblock, useBlocked } from '../net/blocklist';
 import { online } from '../net/online';
 import { rekeyWorker } from '../net/worker';
 import { useSettings, type BoardThemeName, type Settings } from '../settings';
@@ -21,6 +22,7 @@ export default function SettingsScreen() {
   return (
     <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
       <ProfileSection />
+      <BlockedSection />
 
       <Text style={styles.section}>Board theme</Text>
       <View style={styles.themes}>
@@ -219,6 +221,40 @@ function ProfileSection() {
           </Pressable>
         )}
       </View>
+    </>
+  );
+}
+
+function BlockedSection() {
+  const blocked = useBlocked();
+  if (!blocked.length) return null;
+  return (
+    <>
+      <Text style={styles.section}>Blocked players</Text>
+      {blocked.map((b) => (
+        <View key={b.key} style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label} numberOfLines={1}>
+              {b.nick}
+            </Text>
+            <Text style={styles.hint}>
+              ID {b.fingerprint} · blocked {new Date(b.at).toLocaleDateString()}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() =>
+              Alert.alert(`Unblock ${b.nick}?`, 'You could be paired with them again.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Unblock', onPress: () => unblock(b.key) },
+              ])
+            }
+            accessibilityRole="button"
+            accessibilityLabel={`Unblock ${b.nick}`}
+          >
+            <Text style={styles.linkText}>Unblock</Text>
+          </Pressable>
+        </View>
+      ))}
     </>
   );
 }

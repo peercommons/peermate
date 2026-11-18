@@ -10,3 +10,4 @@ export * from './net/pairing.ts';
 export * from './net/session.ts';
 export * from './net/matchmaker.ts';
 export * from './net/router.ts';
+export * from './net/report.ts';
