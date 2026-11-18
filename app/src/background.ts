@@ -1,6 +1,7 @@
 // Background check for friends' messages (SPECS §8.4): Android WorkManager
 // (every ~15 min) / iOS BGTaskScheduler (when iOS chooses). Fetches new private
-// messages from the relays, stores them, and posts local notifications.
+// messages (and challenges sent as messages) from the relays, stores them, and
+// posts local notifications.
 //
 // Defined at module scope from the app entry (index.ts), so it exists when the
 // OS starts the app in the background with no UI.
@@ -9,7 +10,8 @@ import * as TaskManager from 'expo-task-manager';
 import { isBlocked } from './net/blocklist';
 import { friendByNpub, friends } from './net/friends';
 import { addMessage, isUnread, MESSAGE_MAX, syncedTo } from './net/messages';
-import { notifyMessage } from './net/notify';
+import { addIncoming, parseChallenge } from './net/challenges';
+import { notifyChallenge, notifyMessage } from './net/notify';
 import { loadMe } from './net/profile';
 import { fetchDMsOnce } from './net/relay';
 
@@ -28,7 +30,13 @@ export async function checkMessages(maxWaitMs = 15_000): Promise<number> {
     const text = dm.text.slice(0, MESSAGE_MAX);
     if (!addMessage(f.key, { id: dm.id, from: 'them', text, at: dm.at })) continue;
     added++;
-    if (isUnread(f.key, dm.at)) notifyMessage(f.key, f.nick, text);
+    const tc = parseChallenge(text);
+    if (tc) {
+      // Stored for the app to show when it opens; expired or older ones are skipped.
+      if (addIncoming(f.key, tc, dm.at)) notifyChallenge(f.key, f.nick, tc);
+    } else if (isUnread(f.key, dm.at)) {
+      notifyMessage(f.key, f.nick, text);
+    }
   }
   return added;
 }

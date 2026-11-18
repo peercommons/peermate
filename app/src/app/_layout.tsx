@@ -4,7 +4,7 @@ import { Alert } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { registerBackgroundCheck } from '../background';
-import { friendOf, setupNotifications } from '../net/notify';
+import { friendOf, isChallengeTap, setupNotifications } from '../net/notify';
 import { online, useInvite } from '../net/online';
 import { StatusBar } from 'expo-status-bar';
 import { SettingsProvider } from '../settings';
@@ -20,7 +20,10 @@ export default function RootLayout() {
     // A tapped message notification opens that conversation (also from a cold start).
     const open = (r: Notifications.NotificationResponse | null) => {
       const key = friendOf(r);
-      if (key) router.push({ pathname: '/chat/[key]', params: { key } });
+      if (!key) return;
+      // A challenge shows as a dialog wherever we are; open Friends behind it.
+      if (isChallengeTap(r)) router.push('/friends');
+      else router.push({ pathname: '/chat/[key]', params: { key } });
     };
     void Notifications.getLastNotificationResponseAsync().then(open);
     const sub = Notifications.addNotificationResponseReceivedListener(open);
@@ -31,8 +34,29 @@ export default function RootLayout() {
   const invite = useInvite();
   useEffect(() => {
     if (!invite) return;
+    if (invite.kind === 'offline') {
+      const mins = Math.max(1, Math.round((Date.now() - invite.at) / 60_000));
+      const ago = mins < 60 ? `${mins} min ago` : `${Math.round(mins / 60)} h ago`;
+      Alert.alert(
+        `${invite.nick} challenged you`,
+        `${invite.tc} (minutes + seconds per move), ${ago}.\n\n` +
+          `They may not be in the app now. Challenge them back: if they're around, the game starts when they accept; if not, they'll get a notification.`,
+        [
+          { text: 'Not now', style: 'cancel', onPress: () => online.declineInvite() },
+          {
+            text: 'Challenge back',
+            onPress: () => {
+              void online.acceptInvite();
+              router.push('/online');
+            },
+          },
+        ],
+        { cancelable: false },
+      );
+      return;
+    }
     Alert.alert(
-      `${invite.nick} challenges you`,
+      invite.kind === 'answer' ? `${invite.nick} accepted your challenge` : `${invite.nick} challenges you`,
       `${invite.tc} (minutes + seconds per move)\nID ${invite.fingerprint}` +
         (invite.friend ? '' : `\n\n${invite.nick} isn't in your friends yet. Accepting adds them.`),
       [

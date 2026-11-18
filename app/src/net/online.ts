@@ -39,7 +39,17 @@ import { saveGame } from '../storage/games';
 import { block, isBlocked } from './blocklist';
 import { addMessage, isUnread, MESSAGE_MAX, setStatus, syncedTo } from './messages';
 import { applyResult, myRating } from './ratings';
-import { notifyMessage } from './notify';
+import { notifyChallenge, notifyMessage } from './notify';
+import {
+  addIncoming,
+  challengeText,
+  clearIncoming,
+  clearOutgoing,
+  isAnswer,
+  nextIncoming,
+  noteOutgoing,
+  parseChallenge,
+} from './challenges';
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import { loadMe, type Me } from './profile';
 import { RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';
@@ -52,7 +62,21 @@ export const RELAYED_BULLET_WARNING =
   'Playing through relays: each move takes 1–3 s to arrive. The clocks make up for part of the delay, but bullet will feel slow.';
 
 /** A friend's challenge waiting for an answer. */
-export type Invite = { key: string; npub: string; nick: string; fingerprint: string; friend: boolean; tc: string; at: number };
+export type Invite = {
+  key: string;
+  npub: string;
+  nick: string;
+  fingerprint: string;
+  friend: boolean;
+  tc: string;
+  at: number;
+  /**
+   * 'offline': a challenge that came as a message (they may not be online now);
+   * answering it challenges them back. 'answer': their live challenge answers
+   * an offline challenge of ours.
+   */
+  kind?: 'offline' | 'answer';
+};
 
 /** A friend's last presence note (SPECS §6.5). */
 export type Presence = { status: PresenceStatus; at: number };
@@ -168,6 +192,8 @@ class OnlineController {
   private challengeTimer: ReturnType<typeof setTimeout> | null = null;
   /** The one peer a friend-challenge matchmaker is pairing with. */
   private matchmakerPeer: string | null = null;
+  /** The friend our current challenge also went to as a message (sent once). */
+  private offlineSentTo: string | null = null;
   private listening = false;
   /** Friends' presence, by peer key. Replaced (not mutated) on change, for React. */
   presence: ReadonlyMap<string, Presence> = new Map();
@@ -182,6 +208,7 @@ class OnlineController {
     AppState.addEventListener('change', (s) => {
       if (s === 'active') {
         this.onForeground();
+        this.showOfflineInvite(); // the background check may have stored one
         this.announce();
       } else if (s === 'background') {
         this.announce('away'); // best effort: iOS may suspend us first
@@ -539,6 +566,7 @@ class OnlineController {
       }
       this.presenceTimer ??= setInterval(() => this.announce(), PRESENCE_EVERY_MS);
       this.announce();
+      this.showOfflineInvite();
     } catch (err) {
       log('listen failed:', String(err));
     }
@@ -553,9 +581,47 @@ class OnlineController {
     }
     log('message from', f.nick, new Date(dm.at).toISOString());
     const text = dm.text.slice(0, MESSAGE_MAX);
-    if (addMessage(f.key, { id: dm.id, from: 'them', text, at: dm.at }) && isUnread(f.key, dm.at)) {
+    if (!addMessage(f.key, { id: dm.id, from: 'them', text, at: dm.at })) return;
+    const tc = parseChallenge(text);
+    if (tc) {
+      if (!addIncoming(f.key, tc, dm.at)) return; // expired, or an older one
+      log('offline challenge from', f.nick, tc);
+      if (AppState.currentState !== 'active') notifyChallenge(f.key, f.nick, tc);
+      this.showOfflineInvite();
+    } else if (isUnread(f.key, dm.at)) {
       notifyMessage(f.key, f.nick, text);
     }
+  }
+
+  /** Shows a friend's stored offline challenge, if we're free and no dialog is up. */
+  private showOfflineInvite() {
+    if (this.invite) return;
+    const busy = this.state.phase !== 'idle' && this.state.phase !== 'error' && !(this.state.phase === 'game' && this.state.end);
+    if (busy) return;
+    const p = nextIncoming();
+    if (!p) return;
+    const f = getFriend(p.key);
+    if (!f || isBlocked(f.key)) return clearIncoming(p.key);
+    this.invite = {
+      key: f.key,
+      npub: f.npub,
+      nick: f.nick,
+      fingerprint: fingerprint(f.key),
+      friend: true,
+      tc: p.tc,
+      at: p.at,
+      kind: 'offline',
+    };
+    this.emit();
+  }
+
+  /** Also sends a challenge as a message, for a friend whose app isn't open (once per challenge). */
+  private sendOfflineChallenge(friendKey: string, tc: string) {
+    if (this.offlineSentTo === friendKey) return;
+    this.offlineSentTo = friendKey;
+    noteOutgoing(friendKey, tc);
+    log('offline challenge to', getFriend(friendKey)?.nick, tc);
+    void this.sendMessage(friendKey, challengeText(tc));
   }
 
   /**
@@ -630,10 +696,13 @@ class OnlineController {
     }
     refreshFriend(peer, hello.npub, hello.nick);
     this.router?.relayKnown(peer, hello.npub);
-    const busy = this.state.phase !== 'idle' && !(this.state.phase === 'game' && this.state.end);
+    // Free unless searching or playing (an error screen, e.g. "didn't answer", counts as free).
+    const busy = this.state.phase !== 'idle' && this.state.phase !== 'error' && !(this.state.phase === 'game' && this.state.end);
     if (busy) return this.sendDecline(peer, 'busy');
-    if (this.invite?.key === peer && this.invite.tc === hello.invite) return; // a resend
+    if (this.invite?.key === peer && this.invite.tc === hello.invite && this.invite.kind !== 'offline') return; // a resend
     log('invite from', hello.nick, hello.invite);
+    clearIncoming(peer); // a live challenge replaces their offline one
+    const answer = isAnswer(peer, hello.invite!);
     this.invite = {
       key: peer,
       npub: hello.npub,
@@ -642,6 +711,7 @@ class OnlineController {
       friend: isFriend(peer),
       tc: hello.invite!,
       at: Date.now(),
+      kind: answer ? 'answer' : undefined,
     };
     if (this.inviteTimer) clearTimeout(this.inviteTimer);
     this.inviteTimer = setTimeout(() => this.clearInvite(), INVITE_TIMEOUT_MS);
@@ -653,6 +723,7 @@ class OnlineController {
     this.inviteTimer = null;
     this.invite = null;
     this.emit();
+    setTimeout(() => this.showOfflineInvite(), 1_000); // the next one, if any
   }
 
   private emit() {
@@ -673,6 +744,10 @@ class OnlineController {
   async challenge(friendKey: string, tc: string): Promise<void> {
     const friend = getFriend(friendKey);
     if (!friend) return;
+    clearIncoming(friend.key); // challenging them answers theirs
+    this.offlineSentTo = null;
+    // Not seen lately: their app is probably closed, so send it as a message too.
+    if (presenceOf(this.presence.get(friend.key)) === 'offline') this.sendOfflineChallenge(friend.key, tc);
     await this.pair(friend.key, friend.npub, friend.nick, tc, true);
   }
 
@@ -680,6 +755,9 @@ class OnlineController {
     const inv = this.invite;
     if (!inv) return;
     this.clearInvite();
+    clearOutgoing(inv.key);
+    // An offline challenge: they may not be online, so challenge them back (live, and as a message).
+    if (inv.kind === 'offline') return this.challenge(inv.key, inv.tc);
     // Accepting someone's challenge makes them a friend (so you can challenge back).
     addFriend(inv.key, inv.npub, inv.nick);
     await this.pair(inv.key, inv.npub, inv.nick, inv.tc, false);
@@ -688,8 +766,9 @@ class OnlineController {
   declineInvite(): void {
     const inv = this.invite;
     if (!inv) return;
+    clearIncoming(inv.key);
     this.clearInvite();
-    this.sendDecline(inv.key, 'declined');
+    if (inv.kind !== 'offline') this.sendDecline(inv.key, 'declined');
   }
 
   /** Pairs with one known player (a friend challenge, either side). */
@@ -725,7 +804,14 @@ class OnlineController {
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0, friend: nick });
       if (this.challengeTimer) clearTimeout(this.challengeTimer);
       this.challengeTimer = setTimeout(() => {
-        if (this.state.phase === 'seeking' && this.state.friend) this.challengeOver(`${nick} didn't answer`);
+        if (this.state.phase !== 'seeking' || !this.state.friend) return;
+        // Their app may be closed: leave the challenge as a message they'll be notified of.
+        if (inviting) this.sendOfflineChallenge(key, tc);
+        this.challengeOver(
+          inviting
+            ? `${nick} didn't answer. They'll get your challenge as a message; if they accept while you're in the app, you'll be asked to play.`
+            : `${nick} didn't answer`,
+        );
       }, INVITE_TIMEOUT_MS + 5_000);
     } catch (err) {
       this.set({ phase: 'error', message: `Couldn't start: ${(err as Error).message}` });

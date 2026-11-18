@@ -21,7 +21,7 @@ export function setupNotifications(): void {
   });
   if (Platform.OS === 'android') {
     void Notifications.setNotificationChannelAsync(CHANNEL, {
-      name: 'Messages from friends',
+      name: 'Messages and challenges from friends',
       importance: Notifications.AndroidImportance.HIGH,
     });
   }
@@ -51,6 +51,24 @@ export function notifyMessage(friendKey: string, nick: string, text: string): vo
     // Android takes the channel from the trigger ("show now, on this channel").
     trigger: Platform.OS === 'android' ? { channelId: CHANNEL } : null,
   }).catch(() => undefined);
+}
+
+/** A friend's challenge that came as a message (their app may be closed now). */
+export function notifyChallenge(friendKey: string, nick: string, tc: string): void {
+  setupNotifications();
+  void Notifications.scheduleNotificationAsync({
+    content: {
+      title: `${nick} challenges you`,
+      body: `${tc} game. Tap to answer.`,
+      data: { friendKey, kind: 'challenge' },
+    },
+    trigger: Platform.OS === 'android' ? { channelId: CHANNEL } : null,
+  }).catch(() => undefined);
+}
+
+/** Whether a tapped notification was a challenge (vs a message). */
+export function isChallengeTap(response: Notifications.NotificationResponse | null): boolean {
+  return response?.notification.request.content.data?.kind === 'challenge';
 }
 
 /** The friend a tapped notification was about. */
