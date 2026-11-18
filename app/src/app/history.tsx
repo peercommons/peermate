@@ -22,6 +22,7 @@ export default function HistoryScreen() {
 
   return (
     <FlatList
+      contentInsetAdjustmentBehavior="automatic"
       data={games ?? []}
       keyExtractor={(g) => g.id}
       contentContainerStyle={styles.list}

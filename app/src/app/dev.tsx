@@ -190,7 +190,7 @@ export default function DevScreen() {
   const ping = () => (mode === 'p2p' ? send({ type: 'ping' }) : nostrRef.current?.ping());
 
   return (
-    <SafeAreaView style={styles.root} edges={["bottom", "left", "right"]}>
+    <SafeAreaView style={styles.root} edges={["top", "bottom", "left", "right"]}>
       <Text style={styles.title}>Dev tools</Text>
       <Text style={styles.meta}>{status}</Text>
       <Text style={styles.meta} selectable>

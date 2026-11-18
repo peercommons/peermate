@@ -33,7 +33,7 @@ export default function OnlineLobby() {
   const activeGame = state.phase === 'game' && !state.end;
 
   return (
-    <ScrollView contentContainerStyle={styles.root}>
+    <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.root}>
       <View style={styles.card}>
         <Text style={styles.label}>Playing as</Text>
         <Text style={styles.nick}>{me?.profile.nick ?? '…'}</Text>

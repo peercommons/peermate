@@ -19,7 +19,7 @@ export default function SettingsScreen() {
   const { settings, update } = useSettings();
 
   return (
-    <ScrollView contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
+    <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
       <ProfileSection />
 
       <Text style={styles.section}>Board theme</Text>

@@ -124,7 +124,7 @@ function ReviewView({ record }: { record: GameRecord }) {
     ]);
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
       <Stack.Screen options={{ title: 'Review' }} />
       <Text style={styles.heading}>
         {record.white} vs {record.black}

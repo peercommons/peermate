@@ -78,7 +78,7 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
   );
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
       <Stack.Screen options={{ title }} />
 
       <PlayerBar name={game.names[top]} active={!game.result && game.turn === top} thinking={game.thinking && game.turn === top} />

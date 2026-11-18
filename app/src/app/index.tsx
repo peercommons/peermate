@@ -32,7 +32,7 @@ export default function Home() {
   const liveOnline = onlineState.phase === 'game' && !onlineState.end ? onlineState : null;
 
   return (
-    <ScrollView contentContainerStyle={styles.root}>
+    <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.root}>
       {liveOnline && (
         <View style={[styles.card, styles.continueCard]}>
           <Text style={styles.heading}>Online game in progress</Text>

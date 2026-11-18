@@ -136,7 +136,7 @@ export default function OnlineGameScreen() {
   const away = silent >= AWAY_AFTER_MS;
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
       <Stack.Screen options={{ title: `${state.tc} vs ${state.opponent.nick}` }} />
 
       <PlayerBar
