@@ -125,6 +125,25 @@ export function useGame(mode: GameMode, resume?: ResumeFrom) {
     [chess, humanToMove, pendingPromotion, selected, turn, makeMove],
   );
 
+  // Drag-and-drop: picking a piece up selects it; dropping it plays the move if
+  // legal and otherwise leaves the piece selected where it was.
+  const onDragStart = useCallback(
+    (square: Square) => {
+      if (!humanToMove || pendingPromotion) return;
+      if (chess.get(square)?.color === turn) setSelected(square);
+    },
+    [chess, humanToMove, pendingPromotion, turn],
+  );
+
+  const onDrop = useCallback(
+    (from: Square, to: Square) => {
+      if (!humanToMove || pendingPromotion || !legalTargets(chess, from).includes(to)) return;
+      if (isPromotion(chess, from, to)) setPendingPromotion({ from, to });
+      else makeMove(from, to);
+    },
+    [chess, humanToMove, pendingPromotion, makeMove],
+  );
+
   const choosePromotion = useCallback(
     (piece: PieceSymbol | null) => {
       if (pendingPromotion && piece) makeMove(pendingPromotion.from, pendingPromotion.to, piece);
@@ -221,6 +240,8 @@ export function useGame(mode: GameMode, resume?: ResumeFrom) {
     names,
     opponentOf: other,
     onSquarePress,
+    onDragStart,
+    onDrop,
     choosePromotion,
     undo,
     resign,

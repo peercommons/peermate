@@ -103,7 +103,9 @@ test('levels are 1-10 and in order', () => {
 
 test('pickMove only randomizes weakened levels, within the pool', () => {
   const ranked = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-  assert.deepEqual(pickMove(getLevel(5).config, 'a', ranked, () => 0), { move: 'a', randomPick: false });
+  assert.deepEqual(pickMove(getLevel(10).config, 'a', ranked, () => 0), { move: 'a', randomPick: false });
+  // Level 9 searches deeper but never randomizes.
+  assert.equal(pickMove(getLevel(9).config, 'a', ranked, () => 0).randomPick, false);
   // Level 1, random() = 0: below randomChance, picks first of bottom half.
   assert.deepEqual(pickMove(getLevel(1).config, 'a', ranked, () => 0), { move: 'e', randomPick: true });
   // random() above randomChance: best move.
@@ -113,6 +115,7 @@ test('pickMove only randomizes weakened levels, within the pool', () => {
 });
 
 test('humanized delay tops weak levels up to at least 0.5 s', () => {
-  assert.equal(humanizedDelayMs(1, 10, () => 0), 490);
+  assert.equal(humanizedDelayMs(1, 10, () => 0), 540);
+  assert.equal(humanizedDelayMs(9, 300, () => 0), 650);
   assert.equal(humanizedDelayMs(10, 1000, () => 0), 0);
 });

@@ -46,8 +46,9 @@ export default function Home() {
         <Text style={styles.heading}>Play the computer</Text>
 
         <Text style={styles.label}>
-          Level {selected.level} · {selected.label} <Text style={styles.subtle}>({selected.targetElo})</Text>
+          Level {selected.level} · {selected.label}
         </Text>
+        <Text style={styles.subtle}>{selected.blurb}</Text>
         <View style={styles.levels}>
           {LEVELS.map((l) => (
             <Chip key={l.level} label={String(l.level)} selected={l.level === level} onPress={() => setLevel(l.level)} />

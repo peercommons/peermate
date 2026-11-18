@@ -39,6 +39,18 @@ cd ../core && npm install && npm test   # install core before building the app: 
 
 For a real NAT test, put the phone on **mobile data** (not your Wi-Fi), or use two phones on different networks.
 
+### Calibrate the CPU levels
+
+Plays the levels against each other and against Stockfish at fixed `UCI_Elo` anchors, then fits a rating per level (SPECS §12.3). Takes about an hour on an M-series Mac.
+
+```sh
+native/build-arasan-desktop.sh   # desktop engine build (not shipped)
+brew install stockfish           # measuring stick only (not shipped)
+node core/tools/calibrate.ts --games 24 --concurrency 4
+```
+
+Results go to `native/build/calibration.json`. `--phone-speed` scales search time to the target phone (default 0.41: Galaxy A56 vs M-series nodes/s).
+
 ## Sideload builds
 
 One-time setup:

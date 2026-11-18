@@ -28,11 +28,11 @@ export function parseInfoScore(line: string, sideToMove: Color): Score | null {
  * "normalized" centipawns, where +1.00 means roughly a 50% chance to win.
  * Multiply an engine's raw cp by its scale to get there.
  *
- * Arasan: provisional 0.45, from comparing its evals of the start position
- * (+0.67) and 1.f3 (-1.35) with a normalized engine (~+0.25 / ~-0.7).
- * Replace with a value fitted on real games (SPECS §12.3).
+ * Arasan: 0.48, fitted by core/tools/cp-scale.ts on 101 positions from the
+ * calibration games scored by both Arasan v26.1 and Stockfish 19 (median
+ * ratio 0.481, least squares 0.509, correlation 0.98; SPECS §5.1a).
  */
-export const ARASAN_CP_SCALE = 0.45;
+export const ARASAN_CP_SCALE = 0.48;
 
 /** Score in normalized centipawns (mates and on-board checkmates unchanged). */
 export function normalize(s: Score, cpScale: number): Score {

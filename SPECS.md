@@ -237,28 +237,30 @@ Public MQTT brokers *can* work technically (topic = `peermate/v1/lobby/blitz`, p
 The identical results for 1200–1650 suggest Arasan's limiter may not separate those settings well. The level table below must be **re-derived from game-based calibration** (§12.3), not taken from `UCI_Elo` labels.
 
 ### 5.1a Analysis score scale
-Arasan's centipawns run about 2× larger than "normalized" engines (start position +0.67 vs ~+0.25). Post-game judgments use a logistic win-chance curve that assumes normalized centipawns, so Arasan scores are multiplied by `ARASAN_CP_SCALE` (provisional **0.45**, in `core/src/analysis.ts`) before judging and display. Raw scores are stored, so refitting the constant (§12.3) needs no re-analysis.
+Arasan's centipawns run about 2× larger than "normalized" engines. Post-game judgments use a logistic win-chance curve that assumes normalized centipawns, so Arasan scores are multiplied by `ARASAN_CP_SCALE` = **0.48** (`core/src/analysis.ts`) before judging and display. Fitted by `core/tools/cp-scale.ts`: 101 positions from calibration games scored by Arasan v26.1 and Stockfish 19 at 300 ms; median ratio 0.481, least squares 0.509, correlation 0.98. Raw scores are stored, so refitting needs no re-analysis.
 
 ### 5.2 Difficulty levels
-Elo figures are *targets*. Calibrate them in CI by running `cutechess-cli` matches against anchored engines (§12.3).
+Calibrated by self-play (§12.3). Every level beats the one below it; steps are roughly 100–350 Elo (wider at the top). Absolute human Elo isn't measured yet, so the app describes levels in words instead of numbers.
 
-| Level | Label | Target Elo | Arasan config | Extra behavior |
-|---|---|---|---|---|
-| 1 | Newcomer | ~400 | depth cap 1, `MultiPV 8` | 40% chance to play a random move from the weaker half of the candidates; never sees 1-move mates |
-| 2 | Beginner | ~600 | depth cap 2, `MultiPV 8` | 25% random choice from the top 8 |
-| 3 | Novice | ~800 | depth cap 3, `MultiPV 5` | 15% random choice from the top 5 |
-| 4 | Casual | ~1000 | `UCI_LimitStrength=true`, `UCI_Elo=1000`, `MultiPV 4` | 5% random choice from the top 4 |
-| 5 | Club | ~1200 | `UCI_Elo=1200` | n/a |
-| 6 | Intermediate | ~1400 | `UCI_Elo=1400` | n/a |
-| 7 | Advanced | ~1650 | `UCI_Elo=1650` | n/a |
-| 8 | Expert | ~1950 | `UCI_Elo=1950` | n/a |
-| 9 | Master | ~2300 | `UCI_Elo=2300` | n/a |
-| 10 | Grandmaster | 2800+ | Full strength (`UCI_LimitStrength=false`), `movetime` 1000 ms | n/a |
+| Level | Label | Arasan config | Extra behavior |
+|---|---|---|---|
+| 1 | Newcomer | depth 1, `MultiPV 8` | 40% chance: random move from the weaker half of the candidates |
+| 2 | Beginner | depth 1, `MultiPV 8` | 30%: random choice from the top 8 |
+| 3 | Novice | depth 2, `MultiPV 6` | 25%: random from the top 6 |
+| 4 | Casual | depth 3, `MultiPV 5` | 20%: random from the top 5 |
+| 5 | Club | depth 3, `MultiPV 4` | 10%: random from the top 4 |
+| 6 | Intermediate | depth 4, `MultiPV 4` | 10%: random from the top 4 |
+| 7 | Advanced | depth 5, `MultiPV 3` | 3%: random from the top 3 |
+| 8 | Expert | depth 6, `MultiPV 2` | 2%: random from the top 2 |
+| 9 | Master | depth 8 | n/a |
+| 10 | Grandmaster | Full strength, `movetime` 1000 ms | n/a |
+
+**Why not `UCI_Elo`:** calibration showed Arasan's limiter is far weaker than its labels below ~2000. `UCI_Elo` 1000 lost 24–0 to a depth-3 search, and 1000–1650 all rated below a depth-1 search with random moves. Depth caps plus random picks are also smooth to tune and cost milliseconds per move.
 
 Notes:
-- Arasan's `UCI_Elo` range is **1000–3450**, so levels 4–9 use it directly. Its README's `Strength` (0–100) option is **not exposed over UCI**, so levels 1–3 (below 1000) rely on depth caps plus controlled randomness ("blunder injection"): `EngineService` picks among the `MultiPV` candidate lines (verified: depth 1 returns 8 ranked candidates).
+- Levels pick among the `MultiPV` candidate lines (`pickMove` in `core/src/levels.ts`).
 - Send `ucinewgame` between games and when changing level, so hash-table results from a stronger search don't leak into a weaker one.
-- **Humanized think time:** random 300–1500 ms delay at low levels so the CPU doesn't reply instantly.
+- **Humanized think time:** levels 1–9 search in milliseconds, so the reply is padded to 0.55–1.8 s (longer at higher levels).
 - Engine runs with `Threads=1` and `Hash=16` (**MB**; the UCI option is in megabytes, min 4) to limit memory, battery and thermal load.
 - Post-game analysis (§2.5) uses the same engine at full strength with a time budget.
 - Adaptive mode (v1.1): suggests the next level after 3 wins/losses in a row.
@@ -467,8 +469,9 @@ Setting: "Hide my IP from opponents" → disables HyperDHT direct connections; a
 - Sound + haptics on move, capture, check, low time (<10 s).
 
 ### 10.2 2D (v1.0)
-- **react-native-skia** board: 60 fps on mid-range devices, crisp vector pieces.
-- Original piece sets (SVG) — at least 3 built-in — plus board themes (wood, green, blue, high-contrast).
+- **react-native-skia** board: 60 fps on mid-range devices, crisp vector pieces. *(Phase 1 ships plain views plus `react-native-svg`; move to Skia only if profiling on low-end phones demands it.)*
+- Original piece sets (SVG) — at least 3 built-in — plus board themes (wood, green, blue, high-contrast). **Set 1 ("Peermate classic") is done:** drawn for this project as path data on a 100×100 canvas (`app/src/components/pieces.ts`; preview sheet via `node app/tools/pieces-preview.mjs out.svg`).
+- **Drag-and-drop** (done): one responder on the board decides tap vs drag (travel > 20% of a square from a movable piece). The lifted piece follows the finger on an `Animated` value (no board re-render per frame), the square under the finger gets a hover outline, an illegal drop snaps back with the piece still selected. The source square keeps a faded copy mounted: unmounting the view a touch started on makes Android drop the rest of the gesture. Squares expose an `activate` accessibility action, so screen readers still work.
 - Coordinates, last-move highlight, legal-move dots, check highlight.
 
 ### 10.3 3D (v1.1)
@@ -511,7 +514,18 @@ VoiceOver/TalkBack: squares labelled ("e4, white knight"), move announcements, a
 - Network chaos via `tc netem`: latency 50–800 ms, 5% loss, partitions.
 
 ### 12.3 Engine calibration
-Nightly job: `cutechess-cli` round-robin of each level vs. anchor engines with known ratings, ≥ 400 games/level, updates the Elo table in §5.2; fails if levels are not monotonically ordered with ≥ 100 Elo gaps.
+`core/tools/calibrate.ts` (see README) plays levels against each other and against Stockfish at fixed `UCI_Elo` anchors on a Mac, driving each level exactly as the app does. Timed searches are scaled to the phone (`--phone-speed 0.41`: Galaxy A56 258k vs M-series 626k nodes/s). It fits ratings by maximum likelihood with the anchors fixed. Stockfish is a local measuring stick only, never shipped.
+
+**Results (November 2026):**
+- **First run** (old table, 24 games per pairing, 18 pairings): Level 3 (depth 3) beat Level 4 (`UCI_Elo` 1000) 24–0. Fitted order: L4 < L5 < L6 < L1 < L7 < L2 < L8 < L3 < L9 < L10. That led to dropping `UCI_Elo` (§5.2).
+- **Three rounds of candidate tables** (16 games per neighbouring pair) produced the current table. Pooled steps: L1→2 ~220, L2→3 ~160, L3→4 ~100, L4→5 ~160, L5→6 ~340 (before softening L6), L6→7 ~70, L7→8 ~340, L8→9 ~470, L9→10 600+.
+- **Absolute scale not trusted:** Stockfish's limited-strength ratings look inflated at 300 ms per move (depth 3 with 15% random moves beat "SF 1320" 22–2).
+
+**Still to do:**
+- Re-run with ≥ 64 games per pair; at 16 games the error is ±150 Elo.
+- Anchor to human ratings, for example with opt-in result reporting from beta testers.
+- Add a nightly job that fails if levels aren't monotonic.
+- One engine timeout (no `bestmove` within 120 s) happened in a `UCI_Elo` 2700 vs full-strength game; it is being investigated.
 
 ### 12.4 E2E
 **Maestro** flows on iOS simulator + Android emulator: onboarding, vs-CPU game to mate, pass & play, two-emulator online game over local testnet, chat, block/report.
@@ -637,7 +651,7 @@ Sideloading notes:
 | Phase | Duration | Scope | Exit criteria |
 |---|---|---|---|
 | **0: Spikes (Android)** | 3 wks | (a) RN + Bare Kit + Hyperswarm on real Android devices; (b) hole-punch success field test; (c) Nostr ephemeral-event support across candidate relays; (d) Arasan TurboModule on device: network-file size, CPU/battery use, and `UCI_Elo` behaviour at low levels; (e) R3F/expo-gl 3D perf prototype; (f) Fastlane `android sideload` lane producing a signed APK on a GitHub Release | Go/no-go per spike; fallback plans (WebRTC instead of HyperDHT; Flutter for 2D-only) decided |
-| **1: Offline core** | 4 wks | Rules, 2D board, vs CPU (10 levels), pass & play, PGN, history, settings, analysis | Calibration within ±150 Elo of targets |
+| **1: Offline core** | 4 wks | Rules, 2D board, vs CPU (10 levels), pass & play, PGN, history, settings, analysis | Levels strictly ordered by self-play calibration (done); human-Elo anchoring moves to beta |
 | **2: Online MVP** | 6 wks | Identity/backup, Hyperswarm lobby + Nostr fallback, protocol, clocks, reconnect, in-game quick-chat, block/report. **iOS checkpoint:** run spike (a) and a full online game on a real iPhone, including backgrounding behaviour | 100 internal games across networks, < 2% failed games; iOS checkpoint passed |
 | **3: Social** | 3 wks | Friends, presence, NIP-17 DMs, challenges, ratings + NIP-64 publishing | n/a |
 | **4: Store readiness** | 2 wks | Developer accounts (start the Play 12-tester / 14-day closed test early), Fastlane `ios` lanes + `match`, store name, metadata, screenshots automation, privacy policy, UGC compliance, accessibility pass, public beta (TestFlight external + Play open testing) | Passes App Review + Play review |

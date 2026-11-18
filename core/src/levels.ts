@@ -6,22 +6,25 @@ export type LevelConfig =
   | { kind: 'elo'; elo: number; movetimeMs: number }
   | { kind: 'full'; movetimeMs: number };
 
-export type Level = { level: number; label: string; targetElo: string; config: LevelConfig };
+export type Level = { level: number; label: string; blurb: string; config: LevelConfig };
 
-// Arasan's UCI_Elo floor is 1000 and it exposes no "Strength" option over UCI, so
-// levels below 1000 cap the depth and sometimes play a random candidate move.
-// Target Elos are provisional until game-based calibration (SPECS §12.3).
+// Calibrated by self-play (core/tools/calibrate.ts, SPECS §12.3): every level beats
+// the one below it; typical steps are 100-350 Elo, wider at the top. Arasan's own
+// UCI_Elo limiter turned out far weaker than its labels below ~2000 (1000-1650 lost
+// to a depth-1 search), so every level except 10 uses depth caps plus occasional
+// random picks among the engine's top candidates. Absolute human Elo isn't known
+// yet, so the app describes levels in words rather than numbers.
 export const LEVELS: readonly Level[] = [
-  { level: 1, label: 'Newcomer', targetElo: '~400', config: { kind: 'weakened', depth: 1, multiPv: 8, randomChance: 0.4, pickFrom: 'bottom-half' } },
-  { level: 2, label: 'Beginner', targetElo: '~600', config: { kind: 'weakened', depth: 2, multiPv: 8, randomChance: 0.25, pickFrom: 'top' } },
-  { level: 3, label: 'Novice', targetElo: '~800', config: { kind: 'weakened', depth: 3, multiPv: 5, randomChance: 0.15, pickFrom: 'top' } },
-  { level: 4, label: 'Casual', targetElo: '~1000', config: { kind: 'elo', elo: 1000, movetimeMs: 1000 } },
-  { level: 5, label: 'Club', targetElo: '~1200', config: { kind: 'elo', elo: 1200, movetimeMs: 1000 } },
-  { level: 6, label: 'Intermediate', targetElo: '~1400', config: { kind: 'elo', elo: 1400, movetimeMs: 1000 } },
-  { level: 7, label: 'Advanced', targetElo: '~1650', config: { kind: 'elo', elo: 1650, movetimeMs: 1000 } },
-  { level: 8, label: 'Expert', targetElo: '~1950', config: { kind: 'elo', elo: 1950, movetimeMs: 1000 } },
-  { level: 9, label: 'Master', targetElo: '~2300', config: { kind: 'elo', elo: 2300, movetimeMs: 1000 } },
-  { level: 10, label: 'Grandmaster', targetElo: '2800+', config: { kind: 'full', movetimeMs: 1000 } },
+  { level: 1, label: 'Newcomer', blurb: 'Just learning the moves', config: { kind: 'weakened', depth: 1, multiPv: 8, randomChance: 0.4, pickFrom: 'bottom-half' } },
+  { level: 2, label: 'Beginner', blurb: 'Knows the rules, misses threats', config: { kind: 'weakened', depth: 1, multiPv: 8, randomChance: 0.3, pickFrom: 'top' } },
+  { level: 3, label: 'Novice', blurb: 'Sees simple captures', config: { kind: 'weakened', depth: 2, multiPv: 6, randomChance: 0.25, pickFrom: 'top' } },
+  { level: 4, label: 'Casual', blurb: 'Plays sensible moves, still blunders', config: { kind: 'weakened', depth: 3, multiPv: 5, randomChance: 0.2, pickFrom: 'top' } },
+  { level: 5, label: 'Club', blurb: 'Rarely hangs pieces', config: { kind: 'weakened', depth: 3, multiPv: 4, randomChance: 0.1, pickFrom: 'top' } },
+  { level: 6, label: 'Intermediate', blurb: 'Spots short tactics', config: { kind: 'weakened', depth: 4, multiPv: 4, randomChance: 0.1, pickFrom: 'top' } },
+  { level: 7, label: 'Advanced', blurb: 'Solid and tactical', config: { kind: 'weakened', depth: 5, multiPv: 3, randomChance: 0.03, pickFrom: 'top' } },
+  { level: 8, label: 'Expert', blurb: 'Punishes most mistakes', config: { kind: 'weakened', depth: 6, multiPv: 2, randomChance: 0.02, pickFrom: 'top' } },
+  { level: 9, label: 'Master', blurb: 'Very hard to beat', config: { kind: 'weakened', depth: 8, multiPv: 1, randomChance: 0, pickFrom: 'top' } },
+  { level: 10, label: 'Grandmaster', blurb: 'Full engine strength', config: { kind: 'full', movetimeMs: 1000 } },
 ];
 
 export function getLevel(level: number): Level {
@@ -52,7 +55,8 @@ export function pickMove(
  * (SPECS §5.2 "humanized think time"). `elapsedMs` is how long the engine took.
  */
 export function humanizedDelayMs(level: number, elapsedMs: number, random: () => number = Math.random): number {
-  // Levels 1-3 search for a few ms: aim for 0.5-1.5 s total. Stronger levels already think ~1 s.
-  const target = level <= 3 ? 500 + random() * 1000 : 300 + random() * 400;
+  // Depth-capped levels (1-9) answer in milliseconds: aim for 0.55-1.8 s total,
+  // a little longer at higher levels. Level 10 already thinks ~1 s.
+  const target = level <= 9 ? 500 + level * 50 + random() * 800 : 300 + random() * 400;
   return Math.max(0, Math.round(target - elapsedMs));
 }

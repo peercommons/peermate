@@ -93,6 +93,9 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
           lastMove={game.lastMove}
           checkSquare={game.checkSquare}
           onSquarePress={game.onSquarePress}
+          movableColor={game.humanToMove ? game.turn : null}
+          onDragStart={game.onDragStart}
+          onDrop={game.onDrop}
           disabled={!game.humanToMove}
           colors={BOARD_THEMES[settings.boardTheme]}
           showCoordinates={settings.showCoordinates}
