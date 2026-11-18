@@ -503,7 +503,10 @@ class OnlineController {
       const [me, worker] = await Promise.all([loadMe(), getWorker()]);
       const { relay } = this.openTransports(me, worker);
       log('listening for friends');
-      this.dms ??= relay.receiveDMs(syncedTo(), (dm) => this.onDM(dm));
+      if (!this.dms) {
+        log('fetching messages since', new Date(syncedTo() * 1000).toISOString(), 'from', friends().length, 'friend(s)');
+        this.dms = relay.receiveDMs(syncedTo(), (dm) => this.onDM(dm));
+      }
       this.presenceTimer ??= setInterval(() => this.announce(), PRESENCE_EVERY_MS);
       this.announce();
     } catch (err) {
@@ -514,7 +517,11 @@ class OnlineController {
   /** A private message (NIP-17). Only friends' are kept; anyone else's is dropped. */
   private onDM(dm: { id: string; from: string; text: string; at: number }) {
     const f = friendByNpub(dm.from);
-    if (!f || isBlocked(f.key)) return;
+    if (!f || isBlocked(f.key)) {
+      log('message dropped:', f ? 'blocked' : 'not from a friend', dm.from.slice(0, 8));
+      return;
+    }
+    log('message from', f.nick, new Date(dm.at).toISOString());
     addMessage(f.key, { id: dm.id, from: 'them', text: dm.text.slice(0, MESSAGE_MAX), at: dm.at });
   }
 
