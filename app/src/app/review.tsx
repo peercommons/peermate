@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScreenView } from '../components/ScreenView';
 import {
   ARASAN_CP_SCALE,
   Chess,
@@ -124,7 +124,7 @@ function ReviewView({ record }: { record: GameRecord }) {
     ]);
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
+    <ScreenView style={styles.root}>
       <Stack.Screen options={{ title: 'Review' }} />
       <Text style={styles.heading}>
         {record.white} vs {record.black}
@@ -203,7 +203,7 @@ function ReviewView({ record }: { record: GameRecord }) {
         <Action label="Delete" onPress={confirmDelete} tone="danger" />
       </View>
       {analysisError && <Text style={styles.error}>Analysis failed: {analysisError}</Text>}
-    </SafeAreaView>
+    </ScreenView>
   );
 }
 

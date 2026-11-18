@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScreenView } from '../components/ScreenView';
 import * as Haptics from 'expo-haptics';
 import {
   AWAY_AFTER_MS,
@@ -136,7 +136,7 @@ export default function OnlineGameScreen() {
   const away = silent >= AWAY_AFTER_MS;
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
+    <ScreenView style={styles.root}>
       <Stack.Screen options={{ title: `${state.tc} vs ${state.opponent.nick}` }} />
 
       <PlayerBar
@@ -264,7 +264,7 @@ export default function OnlineGameScreen() {
           setPromotion(null);
         }}
       />
-    </SafeAreaView>
+    </ScreenView>
   );
 }
 

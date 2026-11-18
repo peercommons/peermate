@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScreenView } from '../components/ScreenView';
 import b4a from 'b4a';
 import p2p from 'expo-bare-kit/workers/p2p/worker';
 import { joinNostrRoom, type NostrRoom } from '../../net/nostrRoom';
@@ -190,7 +190,7 @@ export default function DevScreen() {
   const ping = () => (mode === 'p2p' ? send({ type: 'ping' }) : nostrRef.current?.ping());
 
   return (
-    <SafeAreaView style={styles.root} edges={["top", "bottom", "left", "right"]}>
+    <ScreenView style={styles.root}>
       <Text style={styles.title}>Dev tools</Text>
       <Text style={styles.meta}>{status}</Text>
       <Text style={styles.meta} selectable>
@@ -251,7 +251,7 @@ export default function DevScreen() {
         keyExtractor={(_, i) => String(i)}
         renderItem={({ item }) => <Text style={styles.mono}>{item}</Text>}
       />
-    </SafeAreaView>
+    </ScreenView>
   );
 }
 

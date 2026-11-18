@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScreenView } from '../components/ScreenView';
 import * as Haptics from 'expo-haptics';
 import { describeOutcome, getLevel, type Color } from '@peermate/core';
 import { Board } from '../components/Board';
@@ -78,7 +78,7 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
   );
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
+    <ScreenView style={styles.root}>
       <Stack.Screen options={{ title }} />
 
       <PlayerBar name={game.names[top]} active={!game.result && game.turn === top} thinking={game.thinking && game.turn === top} />
@@ -133,7 +133,7 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
       </View>
 
       <PromotionPicker color={game.promotionColor} onChoose={game.choosePromotion} />
-    </SafeAreaView>
+    </ScreenView>
   );
 }
 
