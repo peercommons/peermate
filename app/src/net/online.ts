@@ -21,6 +21,7 @@ import {
   GameSession,
   lobbyRoom,
   Matchmaker,
+  HELLO_TIMEOUT_MS,
   timeControlClass,
   toPgn,
   type Color,
@@ -194,6 +195,8 @@ class OnlineController {
   /** The one peer a friend-challenge matchmaker is pairing with. */
   private matchmakerPeer: string | null = null;
   private muteSyncStarted = false;
+  /** When the current matchmaker was last told about each relay peer (ms). */
+  private relayPeers = new Map<string, number>();
   /** The friend our current challenge also went to as a message (sent once). */
   private offlineSentTo: string | null = null;
   private listening = false;
@@ -254,6 +257,7 @@ class OnlineController {
       if ((this.state as OnlineState).phase !== 'starting') return; // cancelled meanwhile
       this.lobbyPeers.clear();
       const { relay, router } = this.openTransports(me, null);
+      this.relayPeers = new Map();
       const mm = (this.matchmaker = new Matchmaker({
         identity: me.identity,
         nick: me.profile.nick,
@@ -853,6 +857,7 @@ class OnlineController {
         () => this.matchmakerPeer === key && this.state.phase === 'seeking',
       );
       this.matchmaker.peerConnected(key);
+      this.relayPeers = new Map([[key, Date.now()]]);
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0, friend: nick });
       if (this.challengeTimer) clearTimeout(this.challengeTimer);
       this.challengeTimer = setTimeout(() => {
@@ -943,7 +948,22 @@ class OnlineController {
     if (!this.router.npubOf(seek.peer)) this.router.relayKnown(seek.peer, seek.npub);
     this.worker?.send({ type: 'connect', peer: seek.peer }); // try for a direct link too
     this.noteLobbyPeer(seek.peer);
-    this.matchmaker?.peerConnected(seek.peer);
+    this.relayPeerSeen(seek.peer); // seeks repeat every 20 s
+  }
+
+  /**
+   * A lobby peer heard through the relays. Only the first time per search tells
+   * the matchmaker: for a peer it knows, peerConnected() means "new connection"
+   * and resyncs (SYNC + resend everything unacked). Called on every relay
+   * message, that set off a resync storm between the two phones: ~60 messages
+   * for a 6-message handshake, and 15-20 s to start a relayed game.
+   */
+  private relayPeerSeen(peer: string) {
+    // Again after HELLO_TIMEOUT_MS: by then the matchmaker may have dropped a silent peer.
+    const told = this.relayPeers.get(peer);
+    if (!this.matchmaker || (told !== undefined && Date.now() - told < HELLO_TIMEOUT_MS)) return;
+    this.relayPeers.set(peer, Date.now());
+    this.matchmaker.peerConnected(peer);
   }
 
   /** A protocol message through the relays. */
@@ -957,7 +977,7 @@ class OnlineController {
     if (!this.isOpponent(peer)) {
       if (this.state.phase !== 'seeking') return this.checkInvite(peer, wire);
       this.noteLobbyPeer(peer);
-      this.matchmaker?.peerConnected(peer);
+      this.relayPeerSeen(peer);
     }
     this.deliver(peer, wire);
   }
