@@ -1,6 +1,6 @@
 // Game screen: board, status, moves and controls for an offline game.
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
 import { announceMove } from '../game/speech';
@@ -53,6 +53,7 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
   const { width } = useWindowDimensions();
   const boardSize = Math.min(width - 16, 560);
   const [flipped, setFlipped] = useState(false);
+  const moves = useRef<ComponentRef<typeof ScrollView>>(null);
 
   // vs CPU: your colour at the bottom. Pass & play: the side to move (if auto-flip is on).
   const base: Color = mode.kind === 'cpu' ? mode.player : settings.autoFlip ? game.turn : 'w';
@@ -116,7 +117,12 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
 
       <Status game={game} />
 
-      <ScrollView style={styles.moves} contentContainerStyle={styles.movesContent}>
+      <ScrollView
+        ref={moves}
+        style={styles.moves}
+        contentContainerStyle={styles.movesContent}
+        onContentSizeChange={() => moves.current?.scrollToEnd({ animated: true })} // latest move in view
+      >
         <Text style={styles.movesText} selectable>
           {formatMoves(game.sanMoves) || 'No moves yet.'}
         </Text>
@@ -130,7 +136,19 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
           </>
         ) : (
           <>
-            <Control label="Resign" onPress={game.resign} disabled={game.sanMoves.length === 0} />
+            <Control
+              label="Resign"
+              onPress={() =>
+                // It sits next to Undo: a slip shouldn't end the game (online games ask too).
+                Alert.alert('Resign?', mode.kind === 'cpu'
+                    ? 'The computer wins this game.'
+                    : `${game.turn === 'w' ? 'White resigns: Black' : 'Black resigns: White'} wins this game.`, [
+                  { text: 'Keep playing', style: 'cancel' },
+                  { text: 'Resign', style: 'destructive', onPress: game.resign },
+                ])
+              }
+              disabled={game.sanMoves.length === 0}
+            />
             <Control label="Undo" onPress={game.undo} disabled={!game.canUndo} />
           </>
         )}

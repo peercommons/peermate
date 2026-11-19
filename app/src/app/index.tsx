@@ -8,12 +8,17 @@ import { formatDate } from '../game/format';
 import { ui } from '../theme';
 import { engineAvailable, ENGINE_UNAVAILABLE } from '../engine/arasan';
 import { useOnline } from '../net/online';
+import { useSettings } from '../settings';
 
 type ColorChoice = 'w' | 'b' | 'random';
 
 export default function Home() {
-  const [level, setLevel] = useState(3);
-  const [color, setColor] = useState<ColorChoice>('w');
+  // The last level and colour are remembered (settings), so a rematch is one tap.
+  const { settings, update } = useSettings();
+  const level = Math.min(10, Math.max(1, settings.cpuLevel));
+  const color: ColorChoice = settings.cpuColor;
+  const setLevel = (cpuLevel: number) => update({ cpuLevel });
+  const setColor = (cpuColor: ColorChoice) => update({ cpuColor });
   const [unfinished, setUnfinished] = useState<GameRecord | null>(null);
 
   useFocusEffect(

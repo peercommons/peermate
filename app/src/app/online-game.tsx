@@ -1,6 +1,6 @@
 // Online game screen (SPECS §2.4, §6, §8.1). Reads the running GameSession from
 // the online controller; moves go out over the P2P connection.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
@@ -51,6 +51,7 @@ export default function OnlineGameScreen() {
   const [selected, setSelected] = useState<Square | null>(null);
   const [promotion, setPromotion] = useState<{ from: Square; to: Square } | null>(null);
   const [flipped, setFlipped] = useState(false);
+  const panel = useRef<ComponentRef<typeof ScrollView>>(null);
   const [, setTick] = useState(0);
 
   // Clocks: re-render a few times a second while the game runs.
@@ -258,7 +259,12 @@ export default function OnlineGameScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+      <ScrollView
+        ref={panel}
+        style={styles.panel}
+        contentContainerStyle={styles.panelContent}
+        onContentSizeChange={() => panel.current?.scrollToEnd({ animated: true })} // latest move and chat in view
+      >
         <Text style={styles.moves} selectable>
           {formatMoves(session.chess.history()) || 'No moves yet.'}
         </Text>

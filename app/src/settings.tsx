@@ -11,6 +11,9 @@ export type Settings = {
   /** Pass & play: turn the board to the side to move. */
   autoFlip: boolean;
   haptics: boolean;
+  /** Home's last choices for a game against the computer. */
+  cpuLevel: number;
+  cpuColor: 'w' | 'b' | 'random';
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -19,6 +22,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showCoordinates: true,
   autoFlip: true,
   haptics: true,
+  cpuLevel: 3,
+  cpuColor: 'w',
 };
 
 const KEY = 'settings.v1';

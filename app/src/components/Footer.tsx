@@ -49,6 +49,17 @@ export function footerShown(path: string): boolean {
   return !HIDDEN(path);
 }
 
+/**
+ * Opens a footer section on top of Home: the stack becomes Home > section, so the
+ * title bar's back arrow (and Android's back button) always leads Home from a
+ * section, never to whichever section was visited before. Pages opened within a
+ * section (a friend's chat, a game's review) still go back to that section.
+ */
+export function openSection(href: Href) {
+  if (router.canDismiss()) router.dismissAll(); // back to Home (the actions are queued, so one transition)
+  if (href !== '/') router.push(href);
+}
+
 export function Footer() {
   const path = usePathname();
   const insets = useSafeAreaInsets();
@@ -59,7 +70,7 @@ export function Footer() {
   const go = (href: Href | URL) => {
     setMoreOpen(false);
     if (href instanceof URL) void Linking.openURL(href.toString()); // in the browser
-    else router.navigate(href);
+    else openSection(href);
   };
   const moreActive = MORE.some((m) => m.match(path));
 
@@ -74,7 +85,9 @@ export function Footer() {
             icon={active ? (t.icon.replace('-outline', '') as IconName) : t.icon}
             active={active}
             badge={t.key === 'friends' && unread > 0 ? unread : 0}
-            onPress={() => !active && go(t.href)}
+            // Tapping the current tab from deeper in its section (a friend's link)
+            // goes back to the section's first page, as tab bars do.
+            onPress={() => (!active || path !== t.href) && go(t.href)}
           />
         );
       })}
