@@ -262,6 +262,7 @@ class OnlineController {
         network: router,
         onMatch: (m) => this.onMatch(m, tc),
         isBlocked,
+        onLog: (m) => log('mm', m),
       }));
       // Our rating band's room and the class-wide one: similar players meet first,
       // and nobody waits for lack of them (SPECS §6.2).
@@ -337,11 +338,18 @@ class OnlineController {
       onMessage: (npub, wire) => this.onRelayMessage(npub, wire),
       onSeek: (seek) => this.onRelaySeek(seek),
       onPresence: (npub, status) => this.onPresence(npub, status),
+      onLog: (m) => log('relay', m),
     });
     const router = new PeerRouter({
-      directSend: (peer, data) => this.worker?.send({ type: 'send', peer, data }),
+      directSend: (peer, data) => {
+        this.traceHandshake('direct ->', data);
+        this.worker?.send({ type: 'send', peer, data });
+      },
       directDrop: (peer) => this.worker?.send({ type: 'drop', peer }),
-      relaySend: (npub, wire) => relay.send(npub, wire),
+      relaySend: (npub, wire) => {
+        this.traceHandshake('relay ->', wire);
+        relay.send(npub, wire);
+      },
     });
     this.relay = relay;
     this.router = router;
@@ -362,6 +370,15 @@ class OnlineController {
       },
       (err) => log('P2P worker unavailable (relays only):', String(err)),
     );
+  }
+
+  /** Field diagnostics: logs each message while pairing (type, seq, peer), to time handshakes. */
+  private traceHandshake(dir: string, wire: string) {
+    if (this.state.phase !== 'seeking' && this.state.phase !== 'starting') return;
+    const env = decode(wire);
+    if (!env) return;
+    const ack = env.body.t === 'ACK' ? ` ack ${env.body.seq}` : '';
+    log('hs', dir, env.from.slice(0, 6), env.body.t, `seq ${env.seq}${ack}`);
   }
 
   private attachWorker(worker: P2PWorker) {
@@ -827,6 +844,7 @@ class OnlineController {
         helloTimeoutMs: INVITE_TIMEOUT_MS,
         onMatch: (m) => this.onMatch(m, tc),
         onDeclined: (reason) => this.challengeOver(reason === 'busy' ? `${nick} is busy` : `${nick} declined`),
+        onLog: (m) => log('mm', m),
       });
       this.matchmakerPeer = key;
       // Direct if we can (once the worker is up); the relays meanwhile.
@@ -932,6 +950,7 @@ class OnlineController {
   private onRelayMessage(npub: string, wire: string) {
     const peer = wireSender(wire);
     if (!peer || !this.router) return;
+    this.traceHandshake('relay <-', wire);
     // Bind peer key -> Nostr key only from a validly signed message.
     if (!decode(wire)) return;
     this.router.relayKnown(peer, npub);
@@ -957,6 +976,7 @@ class OnlineController {
         }
         return;
       case 'msg':
+        this.traceHandshake('direct <-', e.data);
         this.deliver(e.from, e.data);
         return;
       case 'peer-left':
