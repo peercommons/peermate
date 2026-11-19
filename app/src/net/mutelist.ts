@@ -95,6 +95,7 @@ async function syncOnce(log: (...a: unknown[]) => void) {
   const pk = getPublicKey(sk);
   const key = nip44.getConversationKey(sk, pk);
   const pool = new SimplePool();
+  pool.automaticallyAuth = () => async (event) => finalizeEvent(event, sk); // NIP-42 relays
   try {
     const relays = relayHealth.active();
     const events = await pool.querySync(relays, { kinds: [MUTE_LIST_KIND], authors: [pk] }, { maxWait: 8_000 });

@@ -2,7 +2,7 @@
 // and private messages (kind 1059, stored) from one client to another, each
 // relay on its own. Two fresh identities; no phone needed.
 //
-//   node tools/relay-delivery.mjs
+//   node tools/relay-delivery.mjs [wss://relay ...]     (default: the app's DEFAULT_RELAYS)
 import { useWebSocketImplementation } from 'nostr-tools/pool'
 import { NodeWebSocket } from './ws.mjs'
 import { DEFAULT_RELAYS, RelayNet } from '../src/net/relay.ts'
@@ -14,7 +14,8 @@ const quiet = { onMessage() {}, onLog() {} }
 const origWarn = console.warn
 const authErrors = new Map()
 
-for (const url of DEFAULT_RELAYS) {
+const urls = process.argv.slice(2).filter((a) => a.startsWith('wss://'))
+for (const url of urls.length ? urls : DEFAULT_RELAYS) {
   const a = deriveIdentity(newSeed()), b = deriveIdentity(newSeed())
   let note = false, dm = false
   console.warn = (...x) => { const m = x.join(' '); if (m.includes('auth')) authErrors.set(url, m.slice(0, 90)) }

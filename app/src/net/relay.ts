@@ -11,7 +11,7 @@
 //
 // Shared by the app and the desktop tools (Node runs this .ts file directly).
 import { SimplePool } from 'nostr-tools/pool';
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import * as nip44 from 'nostr-tools/nip44';
 import * as nip17 from 'nostr-tools/nip17';
 import * as nip59 from 'nostr-tools/nip59';
@@ -34,6 +34,10 @@ export const DEFAULT_RELAYS = [
   'wss://offchain.pub',
   'wss://relay.damus.io',
   'wss://nos.lol',
+  // Added 2026-11-19: both passed tools/relay-delivery.mjs for notes and private
+  // messages (auth.nostr1.com is a NIP-42 relay meant for private messages).
+  'wss://auth.nostr1.com',
+  'wss://nostr.data.haus',
 ];
 
 /**
@@ -52,7 +56,11 @@ export function publishTracked(
   relays: string[],
   event: Parameters<SimplePool['publish']>[1],
 ): Promise<boolean> {
-  const tries = pool.publish(relays, event);
+  // Relays that want a login (NIP-42) before accepting an event answer
+  // "auth-required"; with the pool's signer, nostr-tools logs in and retries
+  // (otherwise a send fails until some subscription happens to log in first).
+  const onauth = relays.length ? (pool.automaticallyAuth?.(relays[0]) ?? undefined) : undefined;
+  const tries = pool.publish(relays, event, onauth ? { onauth } : undefined);
   void Promise.allSettled(tries).then((results) => {
     if (!results.some((r) => r.status === 'fulfilled')) return;
     results.forEach((r, i) => relayHealth.record(relays[i], r.status === 'fulfilled'));
@@ -112,11 +120,122 @@ export function rumorId(sk: Uint8Array, npub: string, text: string, createdAt: n
  * One-off fetch of our private messages since `sinceS` (for the background
  * check): connect, collect for up to `maxWaitMs`, disconnect.
  */
+/**
+ * Private-message delivery (SPECS §6.4). Some relays answer OK to a gift wrap
+ * but never hand it back, e.g. when their NIP-42 AUTH is misconfigured, so
+ * publish results (relayHealth) can't reveal them. checkDMDelivery() writes a
+ * short-lived gift wrap to ourselves on each relay alone and reads it back from
+ * that relay; one that can't is left out of private messages only (it still
+ * carries presence, seeks and games) until a later check passes.
+ */
+export const DM_CHECK_EVERY_MS = 6 * 3600_000;
+const DM_CHECK_TEXT = 'peermate delivery check';
+
+class DMDelivery {
+  private bad = new Set<string>();
+  private checkedAt = 0;
+  private listeners = new Set<() => void>();
+
+  /** Restores a saved result. */
+  load(saved: unknown): void {
+    const s = saved as { bad?: unknown; at?: unknown } | null;
+    if (!s || !Array.isArray(s.bad) || typeof s.at !== 'number') return;
+    this.bad = new Set(s.bad.filter((u): u is string => typeof u === 'string' && DEFAULT_RELAYS.includes(u)));
+    this.checkedAt = s.at;
+  }
+
+  snapshot(): { bad: string[]; at: number } {
+    return { bad: [...this.bad], at: this.checkedAt };
+  }
+
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  /** Relays to use for private messages: those that didn't fail the check (at least 2). */
+  usable(relays: readonly string[]): string[] {
+    const ok = relays.filter((u) => !this.bad.has(u));
+    return ok.length >= 2 ? ok : [...relays];
+  }
+
+  /** Whether a check is due. */
+  due(now = Date.now()): boolean {
+    return now - this.checkedAt >= DM_CHECK_EVERY_MS;
+  }
+
+  /** Records a check: true delivered, false accepted but not delivered, null unreachable (no verdict). */
+  update(results: readonly [string, boolean | null][], now = Date.now()): void {
+    for (const [url, ok] of results) {
+      if (ok === true) this.bad.delete(url);
+      else if (ok === false) this.bad.add(url);
+    }
+    this.checkedAt = now;
+    for (const l of [...this.listeners]) l(); // saved; RelayNets reopen if the bad set changed
+  }
+
+  isBad(url: string): boolean {
+    return this.bad.has(url);
+  }
+}
+
+export const dmDelivery = new DMDelivery();
+
+/** A gift wrap to ourselves that relays may drop after an hour (NIP-40). */
+function selfWrap(sk: Uint8Array, me: string) {
+  const seal = nip59.createSeal(nip59.createRumor({ kind: 14, content: DM_CHECK_TEXT, tags: [['p', me]] }, sk), sk, me);
+  const wrapKey = generateSecretKey();
+  const now = Math.floor(Date.now() / 1000);
+  return finalizeEvent(
+    {
+      kind: 1059,
+      created_at: now,
+      tags: [
+        ['p', me],
+        ['expiration', String(now + 3600)],
+      ],
+      content: nip44.encrypt(JSON.stringify(seal), nip44.getConversationKey(wrapKey, me)),
+    },
+    wrapKey,
+  );
+}
+
+/** Runs the private-message delivery check on `relays` (each on its own); see DMDelivery. */
+export async function checkDMDelivery(
+  nostrSecret: Uint8Array,
+  onLog?: (message: string) => void,
+  relays: readonly string[] = DEFAULT_RELAYS,
+): Promise<void> {
+  const me = getPublicKey(nostrSecret);
+  const pool = new SimplePool();
+  pool.automaticallyAuth = () => async (event) => finalizeEvent(event, nostrSecret);
+  try {
+    const results = await Promise.all(
+      relays.map(async (url): Promise<[string, boolean | null]> => {
+        const wrap = selfWrap(nostrSecret, me);
+        try {
+          await Promise.any(pool.publish([url], wrap, { onauth: (e) => Promise.resolve(finalizeEvent(e, nostrSecret)) }));
+        } catch {
+          return [url, null]; // unreachable or refused: relayHealth's business
+        }
+        await new Promise((r) => setTimeout(r, 2_000));
+        const found = await pool.querySync([url], { kinds: [1059], ids: [wrap.id] }, { maxWait: 8_000 });
+        return [url, found.length > 0];
+      }),
+    );
+    dmDelivery.update(results);
+    const fmt = (ok: boolean | null) => results.filter(([, r]) => r === ok).map(([u]) => host(u)).join(', ') || '-';
+    onLog?.(`private-message check: delivered ${fmt(true)}; not delivered ${fmt(false)}; unreachable ${fmt(null)}`);
+  } finally {
+    pool.destroy();
+  }
+}
+
 export async function fetchDMsOnce(
   nostrSecret: Uint8Array,
   sinceS: number,
   maxWaitMs = 15_000,
-  relays = relayHealth.active(),
+  relays = dmDelivery.usable(relayHealth.active()),
 ): Promise<{ id: string; from: string; text: string; at: number }[]> {
   const me = getPublicKey(nostrSecret);
   const pool = new SimplePool();
@@ -131,7 +250,7 @@ export async function fetchDMsOnce(
     for (const e of events) {
       try {
         const r = nip17.unwrapEvent(e as never, nostrSecret) as { id: string; pubkey: string; kind: number; content: string; created_at: number };
-        if (r.kind === 14 && typeof r.content === 'string') out.set(r.id, { id: r.id, from: r.pubkey, text: r.content, at: r.created_at * 1000 });
+        if (r.kind === 14 && r.pubkey !== me && typeof r.content === 'string') out.set(r.id, { id: r.id, from: r.pubkey, text: r.content, at: r.created_at * 1000 });
       } catch {
         // not for us, or forged
       }
@@ -172,7 +291,21 @@ export class RelayNet {
     this.tracked = !opts.relays;
     this.relays = opts.relays ?? relayHealth.active();
     // Relays rested or brought back: move publishing and subscriptions over.
-    if (this.tracked) this.stopHealth = relayHealth.onChange(() => this.followHealth());
+    if (this.tracked) {
+      const stopHealth = relayHealth.onChange(() => this.followHealth());
+      // A relay found to swallow private messages: move the message subscription off it.
+      let bad = dmDelivery.snapshot().bad.sort().join();
+      const stopDM = dmDelivery.onChange(() => {
+        const now = dmDelivery.snapshot().bad.sort().join();
+        if (now === bad || this.closed) return;
+        bad = now;
+        for (const reopen of this.reopeners) reopen();
+      });
+      this.stopHealth = () => {
+        stopHealth();
+        stopDM();
+      };
+    }
     this.inbox = this.resilient(
       'inbox',
       () => ({ kinds: [PEERMATE_KIND], '#p': [this.npub], since: Math.floor(Date.now() / 1000) - 10 }),
@@ -194,6 +327,8 @@ export class RelayNet {
     onevent: (e: { id: string; pubkey: string; content: string; tags: string[][]; created_at: number; kind: number; sig: string }) => void,
     /** Watch for our own events echoing back (subscriptions that see some of ours). */
     health = true,
+    /** Which relays to subscribe on (read at each (re)subscribe). */
+    relays: () => string[] = () => this.relays,
   ): { close(): void } {
     let stopped = false;
     let delay = RESUBSCRIBE_MIN_MS;
@@ -218,7 +353,7 @@ export class RelayNet {
       if (stopped || this.closed) return;
       const opened = Date.now();
       const mine = ++generation;
-      sub = this.pool.subscribeMany(this.relays, filter() as never, {
+      sub = this.pool.subscribeMany(relays(), filter() as never, {
         onevent: (e) => {
           delay = RESUBSCRIBE_MIN_MS;
           if (e.pubkey === this.npub) lastOwn = Date.now();
@@ -313,7 +448,7 @@ export class RelayNet {
     const id = rumorId(this.sk, npub, text, createdAt);
     if (this.closed) return { id, ok: false };
     // Sent once any relay has it (a dead relay would otherwise hold this until its timeout).
-    const ok = await publishTracked(this.pool, this.relays, wrap);
+    const ok = await publishTracked(this.pool, dmDelivery.usable(this.relays), wrap);
     return { id, ok };
   }
 
@@ -339,11 +474,12 @@ export class RelayNet {
         } catch {
           return; // not for us, forged, or garbage
         }
-        if (rumor.kind !== 14 || seen.has(rumor.id) || typeof rumor.content !== 'string') return;
+        if (rumor.kind !== 14 || rumor.pubkey === this.npub || seen.has(rumor.id) || typeof rumor.content !== 'string') return;
         seen.add(rumor.id);
         onDM({ id: rumor.id, from: rumor.pubkey, text: rumor.content, at: rumor.created_at * 1000 });
       },
       false, // stored events, none of them ours: no echo to watch for
+      () => dmDelivery.usable(this.relays),
     );
   }
 

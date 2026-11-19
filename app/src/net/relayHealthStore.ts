@@ -2,7 +2,7 @@
 // found dead isn't retried on every launch. Imported for its side effect by
 // everything that opens relay connections in the app.
 import Storage from 'expo-sqlite/kv-store';
-import { relayHealth } from './relay';
+import { dmDelivery, relayHealth } from './relay';
 
 const KEY = 'relayHealth.v1';
 
@@ -22,4 +22,20 @@ relayHealth.onChange(() => {
       // not fatal: we'd just relearn which relays are down
     }
   }, 5_000);
+});
+
+// The private-message delivery check's result (relay.ts DMDelivery), so a relay
+// that swallows messages stays excluded across launches until it's rechecked.
+const DM_KEY = 'relayDM.v1';
+try {
+  dmDelivery.load(JSON.parse(Storage.getItemSync(DM_KEY) ?? 'null'));
+} catch {
+  // start fresh
+}
+dmDelivery.onChange(() => {
+  try {
+    Storage.setItemSync(DM_KEY, JSON.stringify(dmDelivery.snapshot()));
+  } catch {
+    // not fatal: the next check finds them again
+  }
 });

@@ -59,7 +59,7 @@ import './relayHealthStore'; // saved relay health, before any relay connection
 import { startMuteListSync } from './mutelist';
 import { addResult, publishPending, publishPref, setPublishPref, spotCheckRating } from './results';
 import { loadMe, type Me } from './profile';
-import { RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';
+import { checkDMDelivery, dmDelivery, RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
 
 export const TIME_CONTROLS = ['1+0', '2+1', '3+2', '5+0', '10+0', '15+10'] as const;
@@ -636,6 +636,12 @@ class OnlineController {
       if (!this.muteSyncStarted) {
         this.muteSyncStarted = true;
         startMuteListSync(log); // the block list from/to the relays (NIP-51)
+        // Relays that accept private messages but never deliver them (relay.ts DMDelivery).
+        const dmCheck = () => {
+          if (dmDelivery.due()) void checkDMDelivery(me.identity.nostr.secretKey, log).catch((err) => log('private-message check failed:', String(err)));
+        };
+        setTimeout(dmCheck, 20_000); // after start-up traffic
+        setInterval(dmCheck, 30 * 60_000);
         void publishPending(log); // co-signed games not yet on the relays (if the player said yes)
       }
       if (!this.dms) {

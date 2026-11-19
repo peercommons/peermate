@@ -94,6 +94,7 @@ export function publishPending(log: (...a: unknown[]) => void = () => undefined)
       if (todo.length === 0) return;
       const me = await loadMe();
       const pool = new SimplePool();
+      pool.automaticallyAuth = () => async (event) => finalizeEvent(event, me.identity.nostr.secretKey); // NIP-42 relays
       try {
         for (const r of todo) {
           const event = finalizeEvent(
