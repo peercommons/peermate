@@ -30,9 +30,10 @@ test('due every DM_CHECK_EVERY_MS; saved state round-trips; unknown relays are d
 })
 
 test('a run that reached no relay does not count as a check', () => {
+  const t = 10 * DM_CHECK_EVERY_MS // well past the last check
   dmDelivery.load({ bad: [], at: 0 })
-  dmDelivery.update([[a, null], [b, null]], 50_000)
-  assert.equal(dmDelivery.due(50_001), true)
-  dmDelivery.update([[a, null], [b, true]], 60_000)
-  assert.equal(dmDelivery.due(60_001), false)
+  dmDelivery.update([[a, null], [b, null]], t)
+  assert.equal(dmDelivery.due(t + 1), true) // nothing reached: still due
+  dmDelivery.update([[a, null], [b, true]], t)
+  assert.equal(dmDelivery.due(t + 1), false) // b answered: counts
 })
