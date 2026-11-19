@@ -15,7 +15,7 @@ export const CANDIDATE_RELAYS = [
   'wss://relay.nostr.band',
   'wss://nostr-pub.wellorder.net',
   'wss://nostr.fmt.wiz.biz',
-];
+].filter((u, i, all) => all.indexOf(u) === i); // in-use relays may also be candidates
 
 export type RelayResult = {
   url: string;

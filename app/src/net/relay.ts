@@ -19,8 +19,21 @@ import * as nip59 from 'nostr-tools/nip59';
 /** Provisional app-specific ephemeral kind (SPECS §16 Q2). */
 export const PEERMATE_KIND = 25050;
 
-/** Relays that delivered ephemeral events reliably in the Phase 0 probe. */
-export const DEFAULT_RELAYS = ['wss://relay.snort.social', 'wss://relay.damus.io', 'wss://offchain.pub', 'wss://nos.lol'];
+/**
+ * Relays in use. The first five passed the phone relay check on 2026-11-19
+ * (relays.tsx); damus and nos.lol failed it from the test network that day, but
+ * worked in the Phase 0 probe, so they stay as extras. A dead relay costs little:
+ * publishes don't wait for every relay.
+ */
+export const DEFAULT_RELAYS = [
+  'wss://relay.snort.social',
+  'wss://relay.primal.net',
+  'wss://relay.nostr.net',
+  'wss://nostr.bitcoiner.social',
+  'wss://offchain.pub',
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+];
 
 const SEEK_REPEAT_MS = 20_000;
 const RESUBSCRIBE_MIN_MS = 2_000;
@@ -248,8 +261,12 @@ export class RelayNet {
     const wrap = nip17.wrapEvent(this.sk, { publicKey: npub }, text, undefined, undefined, createdAt);
     const id = rumorId(this.sk, npub, text, createdAt);
     if (this.closed) return { id, ok: false };
-    const results = await Promise.allSettled(this.pool.publish(this.relays, wrap));
-    return { id, ok: results.some((r) => r.status === 'fulfilled') };
+    // Sent once any relay has it (a dead relay would otherwise hold this until its timeout).
+    const ok = await Promise.any(this.pool.publish(this.relays, wrap)).then(
+      () => true,
+      () => false,
+    );
+    return { id, ok };
   }
 
   /**

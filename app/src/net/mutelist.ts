@@ -130,8 +130,11 @@ async function syncOnce(log: (...a: unknown[]) => void) {
       },
       sk,
     );
-    const results = await Promise.allSettled(pool.publish(DEFAULT_RELAYS, event));
-    if (results.some((r) => r.status === 'fulfilled')) {
+    const ok = await Promise.any(pool.publish(DEFAULT_RELAYS, event)).then(
+      () => true,
+      () => false,
+    );
+    if (ok) {
       markPublished(changedAt, event.created_at * 1000);
       log('mute list: published', list.length);
     } else {
