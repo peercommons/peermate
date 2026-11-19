@@ -52,6 +52,7 @@ echo "Capturing:"
 seen=0
 for _ in $(seq 1 240); do # up to 2 minutes
   while IFS= read -r line; do
+    seen=$((seen + 1)) # count what we handle: lines can arrive while a shot is saved
     name="$(sed -nE 's/.*\[demo\] shot ([A-Za-z0-9_]+).*/\1/p' <<<"$line")"
     if [[ -n "$name" ]]; then
       xcrun simctl io "$UDID" screenshot --type=png "$OUT/$name.png" >/dev/null 2>&1
@@ -60,7 +61,6 @@ for _ in $(seq 1 240); do # up to 2 minutes
     [[ "$line" == *"[demo] tour failed"* ]] && { echo "$line" >&2; exit 1; }
     [[ "$line" == *"[demo] tour done"* ]] && { echo "Saved to $OUT"; exit 0; }
   done < <(tail -n +$((seen + 1)) "$LOG")
-  seen=$(wc -l < "$LOG")
   sleep 0.5
 done
 echo "Timed out waiting for the demo tour." >&2
