@@ -23,6 +23,7 @@ import {
   Matchmaker,
   HELLO_TIMEOUT_MS,
   checkCosigned,
+  deriveIdentity,
   type Rating,
   timeControlClass,
   toPgn,
@@ -1187,6 +1188,69 @@ class OnlineController {
     log('result co-signed', w.gid.slice(0, 8));
     addResult({ gid: w.gid, cls: w.cls, mine: w.mine, theirs: w.theirs, pgn: w.pgn, at: c.at }, log);
     if (publishPref() === null && this.state.phase === 'game' && this.state.end) this.patchGame({ askPublish: true });
+  }
+
+  // ---- demo mode (store screenshots only; see src/demo.ts) ------------------
+
+  /** Demo mode: friends' presence as given. */
+  demoPresence(entries: [string, PresenceStatus][]): void {
+    this.presence = new Map(entries.map(([key, status]) => [key, { status, at: Date.now() }]));
+    this.emit();
+  }
+
+  /**
+   * Demo mode: a game in progress against an in-memory opponent. Both sides are
+   * real sessions exchanging signed moves, so the screen shows a true game.
+   */
+  async demoGame(opts: { nick: string; rating: number; rd: number; tc: string; moves: string[] }): Promise<void> {
+    const me = await loadMe();
+    const opp = deriveIdentity(new Uint8Array(32).fill(7));
+    const gid = 'demo0000000000000000000000000001';
+    const start = {
+      t: 'START' as const,
+      gid,
+      white: me.identity.peer.publicKey,
+      black: opp.peer.publicKey,
+      tc: opts.tc,
+      fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    };
+    // eslint-disable-next-line prefer-const
+    let theirs: ReliableChannel;
+    const mine = new ReliableChannel({ key: me.identity.peer, peer: opp.peer.publicKey, send: (w) => setTimeout(() => theirs.receive(w), 20) });
+    theirs = new ReliableChannel({ key: opp.peer, peer: me.identity.peer.publicKey, send: (w) => setTimeout(() => mine.receive(w), 20) });
+    mine.gid = theirs.gid = gid;
+    const them = new GameSession({ channel: theirs, game: { start, myColor: 'b', opponent: me.identity.peer.publicKey }, onEvent: () => undefined });
+    this.match = {
+      game: { start, myColor: 'w', opponent: opp.peer.publicKey },
+      channel: mine,
+      opponent: { key: opp.peer.publicKey, nick: opts.nick, npub: opp.nostr.publicKey, rating: opts.rating, rd: opts.rd },
+    };
+    this.session = new GameSession({ channel: mine, game: this.match.game, onEvent: (e) => this.onSessionEvent(e) });
+    this.startedAt = Date.now();
+    this.set({
+      phase: 'game',
+      tc: opts.tc,
+      myColor: 'w',
+      opponent: {
+        key: opp.peer.publicKey,
+        nick: opts.nick,
+        fingerprint: fingerprint(opp.peer.publicKey),
+        rating: formatRating({ r: opts.rating, rd: opts.rd, vol: 0.06, games: 50 }),
+        verified: 'verified',
+      },
+      ratingChange: null,
+      connection: 'direct',
+      end: null,
+      drawOffered: false,
+      notice: null,
+      chat: [],
+      version: 0,
+    });
+    for (const uci of opts.moves) {
+      if (this.session.chess.turn() === 'w') this.move(uci);
+      else them.move(uci);
+      await new Promise((r) => setTimeout(r, 120)); // delivered and acknowledged
+    }
   }
 
   /** The player's answer to "publish your rated games?" (asked once). */

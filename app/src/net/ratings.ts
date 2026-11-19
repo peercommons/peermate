@@ -58,3 +58,8 @@ export function useRatings(): Partial<Record<TimeControlClass, Rating>> {
     () => store.byClass,
   );
 }
+
+/** Demo mode only (store screenshots): set ratings outright. */
+export function setRatingsForDemo(byClass: Store['byClass']): void {
+  save({ ...store, byClass });
+}
