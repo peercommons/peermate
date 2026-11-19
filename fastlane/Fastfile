@@ -469,7 +469,7 @@ platform :ios do
       precheck_include_in_app_purchases: false,
       submit_for_review: options[:submit],
       # A build already on App Store Connect (from `beta`): the newest one for this version.
-      build_number: options[:submit] ? (options[:build] || latest_testflight_build_number(api_key: asc_api_key, version: marketing_version)).to_s : nil,
+      build_number: options[:submit] ? (options[:build] || latest_testflight_build_number(api_key: asc_api_key, app_identifier: BUNDLE_ID, version: marketing_version)).to_s : nil,
       automatic_release: false,
       phased_release: true,
       # Export compliance (the app encrypts games and chat end to end): answered by the
