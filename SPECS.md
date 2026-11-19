@@ -635,6 +635,16 @@ One device and one carrier: keep collecting results from testers on other carrie
 | `screenshots` | `capture_android_screenshots` (screengrab) |
 | `metadata` | `supply(skip_upload_aab: true)` to sync listing text/images from `fastlane/metadata/android` |
 
+**Status (2026-11-19):** all store lanes are written in `fastlane/Fastfile`: Android `build`/`beta`/`promote`/`rollout`/`metadata`, and iOS `certs`/`build`/`beta`/`metadata`/`release`. Only `android build` can run without accounts. It produced a signed `dist/peermate-0.1.0-78.aab` (123 MB, all ABIs; Play serves per-device splits), with 0 password occurrences in the log. Differences from the tables above:
+- Build numbers stay the commit count on both stores (§13.2), shared with sideload/device builds, so a store build always supersedes a sideloaded one. Because of that, upload lanes refuse to run with uncommitted changes (`force:true` overrides).
+- `ios certs` is read-only unless `setup:true`.
+- `ios release` submits the newest TestFlight build for the marketing version (or `build:N`).
+- Export compliance is left to the developer in App Store Connect (the app uses end-to-end encryption).
+- Metadata lanes refuse `{{…}}` placeholders.
+- Screenshots come from `app/tools/screenshots-{android,ios}.sh`, not snapshot/screengrab.
+- `android beta status:draft` is needed until Play has reviewed the app once.
+- Settings are in `fastlane/.env.example`.
+
 **Shared**
 - Auth: **App Store Connect API key** (`app_store_connect_api_key`, `.p8` in CI secret) and **Google Play service-account JSON**. No Apple ID passwords / 2FA in CI.
 - `before_all`: `ensure_git_status_clean` (local), set up `ENV` from secrets.

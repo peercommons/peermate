@@ -1,18 +1,32 @@
 # Peermate release automation. See SPECS.md §13.
 #
+# Development / sideload builds (no store accounts needed):
 #   bundle exec fastlane android sideload              # signed APK in dist/
 #   bundle exec fastlane android sideload publish:true # ...and attach it to a GitHub Release
 #   bundle exec fastlane ios device                    # signed IPA in dist/, installed on the USB iPhone
 #   bundle exec fastlane ios device install:false      # ...build only
 #
+# Store builds (need the Play Console / App Store Connect accounts):
+#   bundle exec fastlane android build     # signed AAB in dist/ (no upload; works without Play)
+#   bundle exec fastlane android beta      # AAB -> Play internal testing track
+#   bundle exec fastlane android promote   # internal -> production, 10% staged rollout
+#   bundle exec fastlane android rollout fraction:0.5
+#   bundle exec fastlane android metadata  # listing text + screenshots only
+#   bundle exec fastlane ios certs setup:true  # ONCE: create the App Store cert/profile in the match repo
+#   bundle exec fastlane ios beta          # App Store IPA -> TestFlight
+#   bundle exec fastlane ios metadata      # listing text + screenshots only (no binary, no review)
+#   bundle exec fastlane ios release       # metadata + submit the latest build for review
+#
 # Secrets come from environment variables, or from fastlane/.env (gitignored;
-# copy fastlane/.env.example). Create the signing key once with
+# copy fastlane/.env.example). Create the Android signing key once with
 # scripts/create-release-keystore.sh.
 
 require 'json'
 
 APP_DIR = File.expand_path('../app', __dir__)
 DIST_DIR = File.expand_path('../dist', __dir__)
+META_DIR = File.expand_path('metadata', __dir__)
+BUNDLE_ID = 'com.peermate.app'
 
 def require_env!(*names)
   missing = names.reject { |n| ENV[n] && !ENV[n].empty? }
@@ -24,40 +38,76 @@ def marketing_version
 end
 
 # Android only installs an update if its versionCode is higher than the
-# installed one. The commit count on the release branch only ever grows.
+# installed one, and both stores need a new build number per upload. The commit
+# count on the release branch only ever grows, and sideload, device and store
+# builds share it, so a store build always supersedes a sideloaded one.
 def next_version_code
   Integer(sh('git rev-list --count HEAD', log: false).strip)
 end
 
+def version_code(options)
+  options[:version_code] ? Integer(options[:version_code]) : next_version_code
+end
+
+# Store builds are numbered by commit count, so two different builds from
+# uncommitted changes would share a number. `force:true` skips the check.
+def ensure_committed!(options)
+  ensure_git_status_clean(show_uncommitted_changes: true) unless options[:force]
+end
+
+# Listing text still holding {{SUPPORT_EMAIL}}-style placeholders must not
+# reach a store (SPECS §13.5).
+def ensure_no_placeholders!(dir)
+  hits = Dir.glob(File.join(dir, '**/*.txt')).select { |f| File.read(f).include?('{{') }
+  return if hits.empty?
+
+  UI.user_error!("Fill in the {{…}} placeholders first:\n  #{hits.map { |f| f.sub("#{META_DIR}/", '') }.join("\n  ")}")
+end
+
 default_platform(:android)
+
+# --------------------------------------------------------------------------
+# Android
+# --------------------------------------------------------------------------
+
+ANDROID_SIGNING_ENV = %w[PEERMATE_KEYSTORE_PATH PEERMATE_KEYSTORE_PASSWORD
+                         PEERMATE_KEY_ALIAS PEERMATE_KEY_PASSWORD].freeze
+
+# Regenerate the native project (Continuous Native Generation), then run a
+# release Gradle task signed with our key. For Play this key is the *upload*
+# key: Play App Signing re-signs with its own app-signing key.
+def android_release(task, code)
+  require_env!(*ANDROID_SIGNING_ENV)
+  ENV['PEERMATE_VERSION_CODE'] = code.to_s # read by app/app.config.js
+  sh("cd #{APP_DIR} && CI=1 npx expo prebuild -p android --clean --no-install")
+
+  # The injected signing properties override the debug signing config in the
+  # generated build.gradle.
+  gradle(
+    project_dir: File.join(APP_DIR, 'android'),
+    task: task,
+    build_type: 'Release',
+    print_command: false, # keep passwords out of the log
+    properties: {
+      'android.injected.signing.store.file' => File.expand_path(ENV['PEERMATE_KEYSTORE_PATH']),
+      'android.injected.signing.store.password' => ENV['PEERMATE_KEYSTORE_PASSWORD'],
+      'android.injected.signing.key.alias' => ENV['PEERMATE_KEY_ALIAS'],
+      'android.injected.signing.key.password' => ENV['PEERMATE_KEY_PASSWORD']
+    }
+  )
+end
+
+def play_json_key
+  require_env!('PEERMATE_PLAY_JSON_KEY')
+  File.expand_path(ENV['PEERMATE_PLAY_JSON_KEY'])
+end
 
 platform :android do
   desc 'Build a signed universal release APK for sideloading (optionally publish to a GitHub Release)'
   lane :sideload do |options|
-    require_env!('PEERMATE_KEYSTORE_PATH', 'PEERMATE_KEYSTORE_PASSWORD',
-                 'PEERMATE_KEY_ALIAS', 'PEERMATE_KEY_PASSWORD')
-
     version = marketing_version
-    code = options[:version_code] ? Integer(options[:version_code]) : next_version_code
-    ENV['PEERMATE_VERSION_CODE'] = code.to_s # read by app/app.config.js
-
-    # Regenerate the native project from app.json (Continuous Native Generation).
-    sh("cd #{APP_DIR} && CI=1 npx expo prebuild -p android --clean --no-install")
-
-    # The injected signing properties override the debug signing config in the
-    # generated build.gradle, so the APK is signed with the release key.
-    gradle(
-      project_dir: File.join(APP_DIR, 'android'),
-      task: 'assemble',
-      build_type: 'Release',
-      print_command: false, # keep passwords out of the log
-      properties: {
-        'android.injected.signing.store.file' => File.expand_path(ENV['PEERMATE_KEYSTORE_PATH']),
-        'android.injected.signing.store.password' => ENV['PEERMATE_KEYSTORE_PASSWORD'],
-        'android.injected.signing.key.alias' => ENV['PEERMATE_KEY_ALIAS'],
-        'android.injected.signing.key.password' => ENV['PEERMATE_KEY_PASSWORD']
-      }
-    )
+    code = version_code(options)
+    android_release('assemble', code)
 
     FileUtils.mkdir_p(DIST_DIR)
     apk = File.join(DIST_DIR, "peermate-#{version}-#{code}.apk")
@@ -80,10 +130,94 @@ platform :android do
 
     apk
   end
+
+  desc 'Build a signed release App Bundle (AAB) for Google Play'
+  lane :build do |options|
+    code = version_code(options)
+    android_release('bundle', code)
+
+    FileUtils.mkdir_p(DIST_DIR)
+    aab = File.join(DIST_DIR, "peermate-#{marketing_version}-#{code}.aab")
+    FileUtils.cp(lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH], aab)
+    UI.success("AAB ready: #{aab}")
+    aab
+  end
+
+  desc 'Build the AAB and upload it to the Play internal testing track'
+  lane :beta do |options|
+    ensure_committed!(options)
+    json_key = play_json_key # fail before the long build
+    aab = build(options)
+    upload_to_play_store(
+      json_key: json_key,
+      package_name: BUNDLE_ID,
+      track: 'internal',
+      aab: aab,
+      # Play only accepts "draft" releases until the app's first review is
+      # done: run with status:draft until then, and roll the draft out in the
+      # Play Console.
+      release_status: options[:status] || 'completed',
+      metadata_path: File.join(META_DIR, 'android'),
+      skip_upload_metadata: true,
+      skip_upload_changelogs: false,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc 'Promote the internal-track build to production as a staged rollout (fraction:, default 0.1)'
+  lane :promote do |options|
+    upload_to_play_store(
+      json_key: play_json_key,
+      package_name: BUNDLE_ID,
+      track: 'internal',
+      track_promote_to: 'production',
+      rollout: (options[:fraction] || '0.1').to_s,
+      skip_upload_aab: true,
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc 'Widen the production staged rollout (fraction: 0.5, then 1.0)'
+  lane :rollout do |options|
+    UI.user_error!('Pass fraction:, e.g. fraction:0.5') unless options[:fraction]
+    upload_to_play_store(
+      json_key: play_json_key,
+      package_name: BUNDLE_ID,
+      track: 'production',
+      rollout: options[:fraction].to_s,
+      skip_upload_aab: true,
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc 'Upload the Play listing (text and screenshots) from fastlane/metadata/android'
+  lane :metadata do
+    dir = File.join(META_DIR, 'android')
+    ensure_no_placeholders!(dir)
+    upload_to_play_store(
+      json_key: play_json_key,
+      package_name: BUNDLE_ID,
+      metadata_path: dir,
+      skip_upload_aab: true,
+      skip_upload_apk: true,
+      skip_upload_changelogs: true
+    )
+  end
 end
 
-# iOS: development-signed builds for our own registered devices (no App Store or
-# TestFlight yet). Signed with the user's team only; see SPECS.md §13.
+# --------------------------------------------------------------------------
+# iOS. Signed with the user's team only; see SPECS.md §13.
+# --------------------------------------------------------------------------
+
 IOS_TEAM_ID = 'QGLA89KHM7'
 
 # The first connected physical iPhone, or PEERMATE_IOS_DEVICE (a UDID).
@@ -104,24 +238,40 @@ def ios_device
   phone.dig('hardwareProperties', 'udid')
 end
 
+# The in-process engine (gitignored build output), then the native project
+# regenerated from app.json (Continuous Native Generation).
+def ios_prebuild(code)
+  ENV['PEERMATE_VERSION_CODE'] = code.to_s # read by app/app.config.js
+  engine = File.join(APP_DIR, 'modules/arasan-engine/ios/Arasan.xcframework')
+  sh(File.expand_path('../native/build-arasan-ios.sh', __dir__)) unless File.exist?(engine)
+
+  # Outside Bundler, so `pod install` uses the system CocoaPods (it isn't in our
+  # Gemfile). Prebuild rewrites app/tsconfig.json; put it back.
+  Bundler.with_unbundled_env do
+    # (It also resets ENV, so the build number is passed explicitly.)
+    sh("cd #{APP_DIR} && CI=1 PEERMATE_VERSION_CODE=#{code} npx expo prebuild -p ios --clean && git checkout tsconfig.json")
+  end
+end
+
+# App Store Connect API key (no Apple ID password or 2FA). The .p8 is either a
+# file (ASC_KEY_PATH) or its contents (ASC_KEY_P8, for CI secrets).
+def asc_api_key
+  require_env!('ASC_KEY_ID', 'ASC_ISSUER_ID')
+  if ENV['ASC_KEY_PATH'].to_s.empty?
+    require_env!('ASC_KEY_P8')
+    app_store_connect_api_key(key_id: ENV['ASC_KEY_ID'], issuer_id: ENV['ASC_ISSUER_ID'], key_content: ENV['ASC_KEY_P8'])
+  else
+    app_store_connect_api_key(key_id: ENV['ASC_KEY_ID'], issuer_id: ENV['ASC_ISSUER_ID'],
+                              key_filepath: File.expand_path(ENV['ASC_KEY_PATH']))
+  end
+end
+
 platform :ios do
   desc 'Build a development-signed release IPA and install it on the connected iPhone'
   lane :device do |options|
     version = marketing_version
-    code = options[:version_code] ? Integer(options[:version_code]) : next_version_code
-    ENV['PEERMATE_VERSION_CODE'] = code.to_s # read by app/app.config.js
-
-    # The in-process engine (gitignored build output).
-    engine = File.join(APP_DIR, 'modules/arasan-engine/ios/Arasan.xcframework')
-    sh(File.expand_path('../native/build-arasan-ios.sh', __dir__)) unless File.exist?(engine)
-
-    # Regenerate the native project from app.json (Continuous Native Generation).
-    # Outside Bundler, so `pod install` uses the system CocoaPods (it isn't in our
-    # Gemfile). Prebuild rewrites app/tsconfig.json; put it back.
-    Bundler.with_unbundled_env do
-      # (It also resets ENV, so the build number is passed explicitly.)
-      sh("cd #{APP_DIR} && CI=1 PEERMATE_VERSION_CODE=#{code} npx expo prebuild -p ios --clean && git checkout tsconfig.json")
-    end
+    code = version_code(options)
+    ios_prebuild(code)
 
     FileUtils.mkdir_p(DIST_DIR)
     name = "peermate-#{version}-#{code}.ipa"
@@ -149,5 +299,112 @@ platform :ios do
     end
 
     ipa
+  end
+
+  desc 'App Store certificate + profile from the private match repo (setup:true creates them, once)'
+  lane :certs do |options|
+    require_env!('MATCH_GIT_URL', 'MATCH_PASSWORD')
+    match(
+      type: 'appstore',
+      app_identifier: BUNDLE_ID,
+      team_id: IOS_TEAM_ID,
+      git_url: ENV['MATCH_GIT_URL'],
+      api_key: asc_api_key,
+      # Never create or revoke certificates by accident: only on an explicit setup run.
+      readonly: !options[:setup]
+    )
+  end
+
+  desc 'Build an App Store-signed IPA (with dSYMs) in dist/'
+  lane :build do |options|
+    certs
+    version = marketing_version
+    code = version_code(options)
+    ios_prebuild(code)
+
+    profile = ENV["sigh_#{BUNDLE_ID}_appstore_profile-name"]
+    UI.user_error!('match gave no App Store profile') if profile.to_s.empty?
+    xcodeproj = File.join(APP_DIR, 'ios/Peermate.xcodeproj')
+    update_code_signing_settings(
+      path: xcodeproj,
+      targets: ['Peermate'],
+      use_automatic_signing: false,
+      team_id: IOS_TEAM_ID,
+      code_sign_identity: 'Apple Distribution',
+      profile_name: profile,
+      build_configurations: ['Release']
+    )
+
+    FileUtils.mkdir_p(DIST_DIR)
+    name = "peermate-#{version}-#{code}-appstore.ipa"
+    build_app(
+      workspace: File.join(APP_DIR, 'ios/Peermate.xcworkspace'),
+      scheme: 'Peermate',
+      configuration: 'Release',
+      export_method: 'app-store',
+      export_team_id: IOS_TEAM_ID,
+      export_options: { provisioningProfiles: { BUNDLE_ID => profile } },
+      derived_data_path: File.join(APP_DIR, 'ios/build'),
+      output_directory: DIST_DIR,
+      output_name: name,
+      include_symbols: true
+    )
+    ipa = File.join(DIST_DIR, name)
+    UI.success("IPA ready: #{ipa}")
+    ipa
+  end
+
+  desc 'Build and upload to TestFlight (groups: "Name,Name" also distributes to external groups)'
+  lane :beta do |options|
+    ensure_committed!(options)
+    notes = File.read(File.join(META_DIR, 'ios/en-US/release_notes.txt')).strip
+    UI.user_error!('release_notes.txt still has {{…}} placeholders') if notes.include?('{{')
+    ipa = build(options)
+    groups = options[:groups].to_s.split(',').map(&:strip).reject(&:empty?)
+    upload_to_testflight(
+      api_key: asc_api_key,
+      ipa: ipa,
+      changelog: notes,
+      distribute_external: !groups.empty?,
+      groups: groups.empty? ? nil : groups,
+      skip_waiting_for_build_processing: groups.empty?
+    )
+  end
+
+  desc 'Upload App Store listing text and screenshots (no binary, no review submission)'
+  lane :metadata do
+    deliver_listing(submit: false)
+  end
+
+  desc 'Upload the listing and submit the newest TestFlight build (or build:N) for review (manual release, phased)'
+  lane :release do |options|
+    deliver_listing(submit: true, build: options[:build])
+  end
+
+  private_lane :deliver_listing do |options|
+    dir = File.join(META_DIR, 'ios')
+    ensure_no_placeholders!(dir)
+    deliver(
+      api_key: asc_api_key,
+      app_identifier: BUNDLE_ID,
+      app_version: marketing_version,
+      metadata_path: dir,
+      screenshots_path: File.expand_path('screenshots', __dir__),
+      overwrite_screenshots: true,
+      skip_binary_upload: true,
+      skip_app_version_update: false,
+      force: true, # no HTML preview prompt
+      run_precheck_before_submit: options[:submit],
+      precheck_include_in_app_purchases: false,
+      submit_for_review: options[:submit],
+      # A build already on App Store Connect (from `beta`): the newest one for this version.
+      build_number: options[:submit] ? (options[:build] || latest_testflight_build_number(api_key: asc_api_key, version: marketing_version)).to_s : nil,
+      automatic_release: false,
+      phased_release: true,
+      # Export compliance (the app encrypts games and chat end to end): answered by the
+      # developer in App Store Connect, or set ITSAppUsesNonExemptEncryption in app.json
+      # once decided. Not guessed here.
+      submission_information: { add_id_info_uses_idfa: false }
+    )
   end
 end
