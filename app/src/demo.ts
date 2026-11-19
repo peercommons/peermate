@@ -112,5 +112,6 @@ export async function seedDemo(): Promise<void> {
 
 /** The live-looking online game (Online screen screenshot). */
 export function startDemoGame(): Promise<void> {
-  return online.demoGame({ nick: 'Tomás', rating: 1671, rd: 64, tc: '5+0', moves: ITALIAN });
+  // 18 plies: 9...Bf6, with White (the player) to move.
+  return online.demoGame({ nick: 'Tomás', rating: 1671, rd: 64, tc: '5+0', moves: ITALIAN.slice(0, 18) });
 }
