@@ -3,7 +3,9 @@
 Peer-to-peer chess for Android and iOS: play the CPU offline, or find opponents
 worldwide with no servers involved. Full design: [SPECS.md](SPECS.md).
 
-Status: **Phase 1** (offline game: vs CPU, pass & play, saved games with resume, review and engine analysis, settings). Phase 0 spikes are under **Dev tools** in the app.
+Status: **Phase 4, store preparation.** Implemented: the offline game (vs the computer at 10 levels, pass & play, saved games, review with engine analysis); online play phone to phone over Hyperswarm with a Nostr relay fallback (Quick Match by rating, time controls, reconnect, chat); and friends (QR codes, presence, messages, challenges, block list, local Glicko-2 ratings with co-signed NIP-64 results).
+
+Website and privacy policy: [peercommons.org/peermate](https://peercommons.org/peermate/). Questions and bug reports: [Issues](https://github.com/peercommons/peermate/issues) or support@peercommons.org.
 
 ## Layout
 
@@ -12,7 +14,8 @@ Status: **Phase 1** (offline game: vs CPU, pass & play, saved games with resume,
 | `app/` | Expo / React Native app. Screens in `app/src/app/` (Expo Router), board in `app/src/components/`, game state in `app/src/game/`. `app/p2p/worker.js` is the Hyperswarm worker that runs in a Bare worklet. |
 | `app/tools/` | Runs the same worker under Node: a desktop test peer and an automated local-testnet test. |
 | `core/` | Pure TypeScript game/protocol logic (no React Native). |
-| `fastlane/` | Release automation (`android sideload` for now). |
+| `fastlane/` | Release automation: sideload/device builds, store uploads (Play, TestFlight), listing metadata and screenshots. |
+| `docs/` | The GitHub Pages site (landing page, privacy policy). |
 | `native/` | Arasan chess engine (submodule), its Android build script, and a device benchmark (`native/tools/arasan-bench.mjs`). |
 | `scripts/` | One-off setup scripts. |
 
@@ -77,3 +80,7 @@ bundle exec fastlane android sideload              # -> dist/peermate-<version>-
 bundle exec fastlane android sideload publish:true # also attach to a GitHub Release
 adb install -r dist/peermate-*.apk                 # or send the APK to a tester
 ```
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Third-party components keep their own licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Arasan engine (`native/arasan`) is MIT.
