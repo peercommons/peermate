@@ -1,1 +1,1 @@
-{{SUPPORT_URL}}
+https://github.com/peercommons/peermate/issues

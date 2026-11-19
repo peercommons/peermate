@@ -1,0 +1,7 @@
+# GitHub Pages for this repo (Settings > Pages > Deploy from branch, folder /docs).
+# Served at https://peercommons.org/peermate/ once the organisation site
+# (peercommons/peercommons.github.io) carries the peercommons.org domain.
+title: Peermate
+description: Peer-to-peer chess. No account, ads or tracking.
+theme: jekyll-theme-minimal
+baseurl: /peermate

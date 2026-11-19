@@ -1,14 +1,15 @@
 ---
 title: Peermate privacy policy
+permalink: /privacy/
 ---
 
 # Peermate privacy policy
 
-_Last updated: {{LAST_UPDATED}}_
+_Last updated: 19 November 2026_
 
 Peermate is a chess app. You can play the computer or a friend on the same phone, or play people online. Online games run directly between phones, with no Peermate server.
 
-**The short version:** we (the developer, {{DEVELOPER_NAME}}) don't collect anything. Peermate has no accounts, analytics, ads or trackers, and no server of ours that your data passes through. Everything stays on your phone, except what has to travel to other players, described below.
+**The short version:** we (the developer, Peercommons) don't collect anything. Peermate has no accounts, analytics, ads or trackers, and no server of ours that your data passes through. Everything stays on your phone, except what has to travel to other players, described below.
 
 ## What stays on your phone
 
@@ -59,4 +60,4 @@ If this policy changes, the new version will be posted here with a new date.
 
 ## Contact
 
-Questions: {{SUPPORT_EMAIL}}
+Questions: [support@peercommons.org](mailto:support@peercommons.org), or open an issue at [github.com/peercommons/peermate](https://github.com/peercommons/peermate/issues).

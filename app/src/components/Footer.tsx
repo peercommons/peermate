@@ -2,7 +2,7 @@
 // the ones that need the whole height (boards, the camera, a chat's keyboard).
 // "More" opens a small menu with the rest.
 import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router, usePathname, type Href } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,11 +30,15 @@ const TABS: { key: string; label: string; icon: IconName; href: Href; match: (p:
   },
 ];
 
-const MORE: { label: string; icon: IconName; href: Href; match: (p: string) => boolean }[] = [
+/** The privacy policy (docs/privacy-policy.md, on GitHub Pages); the stores want it reachable in the app. */
+export const PRIVACY_URL = 'https://peercommons.org/peermate/privacy/';
+
+const MORE: { label: string; icon: IconName; href: Href | URL; match: (p: string) => boolean }[] = [
   { label: 'Settings', icon: 'settings-outline', href: '/settings', match: (p) => p === '/settings' },
   { label: 'Relay check', icon: 'pulse-outline', href: '/relays', match: (p) => p === '/relays' },
   { label: 'Dev tools', icon: 'construct-outline', href: '/dev', match: (p) => p === '/dev' },
   { label: 'Licences', icon: 'document-text-outline', href: '/licenses', match: (p) => p === '/licenses' },
+  { label: 'Privacy policy', icon: 'shield-checkmark-outline', href: new URL(PRIVACY_URL), match: () => false },
 ];
 
 /** Screens that need the full height: no footer. */
@@ -52,9 +56,10 @@ export function Footer() {
   const [moreOpen, setMoreOpen] = useState(false);
   if (!footerShown(path)) return null;
 
-  const go = (href: Href) => {
+  const go = (href: Href | URL) => {
     setMoreOpen(false);
-    router.navigate(href);
+    if (href instanceof URL) void Linking.openURL(href.toString()); // in the browser
+    else router.navigate(href);
   };
   const moreActive = MORE.some((m) => m.match(path));
 

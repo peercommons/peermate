@@ -1,1 +1,1 @@
-{{PRIVACY_URL}}
+https://peercommons.org/peermate/privacy/

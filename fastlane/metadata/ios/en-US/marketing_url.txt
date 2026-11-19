@@ -1,1 +1,1 @@
-{{MARKETING_URL}}
+https://peercommons.org/peermate/
