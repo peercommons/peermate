@@ -5,7 +5,10 @@
 //
 // It refuses to run on an install that has real data, so it can never overwrite
 // a player's friends, games or ratings.
+import { Platform, Settings } from 'react-native';
+import { router, type Href } from 'expo-router';
 import { Chess, deriveIdentity, toPgn } from '@peermate/core';
+import { appLog } from '../modules/peermate-log';
 import { addFriend, friends } from './net/friends';
 import { addMessage } from './net/messages';
 import { online } from './net/online';
@@ -52,7 +55,7 @@ export async function seedDemo(): Promise<void> {
   online.demoPresence(FRIENDS.flatMap((f, i) => (f.status ? [[keys[i], f.status] as [string, typeof f.status]] : [])));
 
   const chat: [('me' | 'them'), string, number][] = [
-    ['them', 'Rematch tonight? I want my revenge for that endgame 😄', 52],
+    ['them', 'Rematch tonight? I want my revenge for that endgame!', 52],
     ['me', 'Ha, sure. 10 minutes this time?', 50],
     ['them', 'Deal. Around 8?', 49],
     ['me', "I'll be there. Bring your Sicilian", 47],
@@ -114,4 +117,49 @@ export async function seedDemo(): Promise<void> {
 export function startDemoGame(): Promise<void> {
   // 18 plies: 9...Bf6, with White (the player) to move.
   return online.demoGame({ nick: 'Tomás', rating: 1671, rd: 64, tc: '5+0', moves: ITALIAN.slice(0, 18) });
+}
+
+let touring = false;
+
+/** True while the demo tour runs (screens skip permission prompts, which would spoil shots). */
+export function demoTourRunning(): boolean {
+  return touring;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * iOS screenshots (tools/screenshots-ios.sh): the simulator can't open a deep
+ * link without an "Open in Peermate?" prompt, so the app tours the screens
+ * itself when launched with `-peermateDemoTour 1`, logging "demo shot <name>"
+ * on each for the script to capture.
+ */
+export async function maybeRunDemoTour(): Promise<void> {
+  if (Platform.OS !== 'ios' || !Settings.get('peermateDemoTour') || touring) return;
+  touring = true;
+  const shot = async (name: string, href: Href, settle: number) => {
+    // Each screen straight from Home, so its back button just says "Peermate".
+    if (router.canDismiss()) router.dismissAll();
+    if (href !== '/') router.push(href);
+    await sleep(settle);
+    appLog('demo', 'shot', name);
+    await sleep(1500); // the script captures meanwhile
+  };
+  try {
+    await sleep(3000);
+    await seedDemo();
+    const maya = deriveIdentity(new Uint8Array(32).fill(FRIENDS[0].seed)).peer.publicKey;
+    // The computer game first: coming back from it makes Home reload, showing "Continue game".
+    await shot('3_vs_computer', { pathname: '/game', params: { resume: 'demo-cpu' } }, 8000);
+    await shot('1_home', '/', 3000);
+    await shot('4_friends', '/friends', 3000);
+    await shot('5_chat', { pathname: '/chat/[key]', params: { key: maya } }, 3000);
+    await shot('6_play_online', '/online', 3000);
+    await shot('7_games', '/history', 3000);
+    void startDemoGame();
+    await shot('2_online_game', '/online-game', 12000);
+    appLog('demo', 'tour done');
+  } catch (err) {
+    appLog('demo', 'tour failed', String(err));
+  }
 }

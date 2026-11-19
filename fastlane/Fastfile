@@ -112,7 +112,7 @@ platform :ios do
     ENV['PEERMATE_VERSION_CODE'] = code.to_s # read by app/app.config.js
 
     # The in-process engine (gitignored build output).
-    engine = File.join(APP_DIR, 'modules/arasan-engine/ios/libarasan.a')
+    engine = File.join(APP_DIR, 'modules/arasan-engine/ios/Arasan.xcframework')
     sh(File.expand_path('../native/build-arasan-ios.sh', __dir__)) unless File.exist?(engine)
 
     # Regenerate the native project from app.json (Continuous Native Generation).

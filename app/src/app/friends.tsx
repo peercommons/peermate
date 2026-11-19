@@ -7,6 +7,7 @@ import { addFriend, friendLink, parseFriendLink, removeFriend, useFriends, type 
 import { online, presenceOf, TIME_CONTROLS, usePresence } from '../net/online';
 import { useUnread } from '../net/messages';
 import { ensureNotificationPermission } from '../net/notify';
+import { demoTourRunning } from '../demo';
 import { loadMe, type Me } from '../net/profile';
 import { ui } from '../theme';
 
@@ -33,7 +34,7 @@ export default function FriendsScreen() {
 
   useEffect(() => {
     loadMe().then(setMe, () => undefined);
-    void ensureNotificationPermission(); // for friends' messages (asked once)
+    if (!demoTourRunning()) void ensureNotificationPermission(); // for friends' messages (asked once)
   }, []);
 
   const myLink = me ? friendLink(me.identity.peer.publicKey, me.identity.nostr.publicKey, me.profile.nick) : null;

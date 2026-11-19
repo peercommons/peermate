@@ -5,6 +5,7 @@ import { Footer } from '../components/Footer';
 import { Stack, router, usePathname } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { registerBackgroundCheck } from '../background';
+import { maybeRunDemoTour } from '../demo';
 import { friendOf, isChallengeTap, setupNotifications } from '../net/notify';
 import { online, useInvite, useOnline } from '../net/online';
 import { StatusBar } from 'expo-status-bar';
@@ -18,6 +19,7 @@ export default function RootLayout() {
     void online.listen(); // reachable for challenges while the app is open
     setupNotifications();
     void registerBackgroundCheck();
+    void maybeRunDemoTour(); // iOS store screenshots only (launched with -peermateDemoTour 1)
     // A tapped message notification opens that conversation (also from a cold start).
     const open = (r: Notifications.NotificationResponse | null) => {
       const key = friendOf(r);
