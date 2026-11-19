@@ -228,6 +228,8 @@ class OnlineController {
   /** Friends' presence, by peer key. Replaced (not mutated) on change, for React. */
   presence: ReadonlyMap<string, Presence> = new Map();
   private toldAt = new Map<string, number>();
+  /** Presence rounds run (logged with each note, to check the timer keeps going). */
+  private rounds = 0;
   private presenceTimer: ReturnType<typeof setInterval> | null = null;
   private dms: { close(): void } | null = null;
   /** When the current direct link to the opponent came up (grace period for the stale check). */
@@ -745,6 +747,7 @@ class OnlineController {
    */
   private presenceRound() {
     const now = Date.now();
+    this.rounds++;
     const list = friends();
     const current = new Set(list.map((f) => f.key));
     for (const key of this.toldAt.keys()) if (!current.has(key)) this.toldAt.delete(key); // removed: greet again if re-added
@@ -763,7 +766,9 @@ class OnlineController {
   }
 
   private tell(to: readonly { key: string; npub: string }[], status: PresenceStatus = this.myStatus()) {
-    if (!this.relay || to.length === 0) return;
+    if (to.length === 0) return;
+    if (!this.relay) return log('presence: no relay connection;', to.length, 'note(s) not sent');
+    log('presence', status, '(round', this.rounds + ')', 'to', to.map((f) => getFriend(f.key)?.nick ?? f.key.slice(0, 8)).join(', '));
     const now = Date.now();
     for (const f of to) {
       this.relay.sendPresence(f.npub, status);

@@ -18,7 +18,7 @@ import { writeFileSync } from 'node:fs'
 import { useWebSocketImplementation } from 'nostr-tools/pool'
 import QRCode from 'qrcode'
 import { NodeWebSocket } from './ws.mjs'
-import { RelayNet } from '../src/net/relay.ts'
+import { DEFAULT_RELAYS, RelayNet } from '../src/net/relay.ts'
 import { deriveIdentity, fingerprint } from '../../core/src/index.ts'
 
 useWebSocketImplementation(NodeWebSocket)
@@ -49,8 +49,11 @@ let last = null
 let heardAt = 0
 const counts = { presence: 0, dm: 0, other: 0 }
 
+// All relays, fixed: a monitor must hear whichever ones the phone uses (its
+// own relay health would otherwise rest some, and miss notes sent there).
 const relay = new RelayNet({
   nostrSecret: id.nostr.secretKey,
+  relays: option('--health') ? undefined : DEFAULT_RELAYS,
   onMessage: () => counts.other++,
   onPresence: (npub, status) => {
     const now = Date.now()
