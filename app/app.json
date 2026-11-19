@@ -12,6 +12,9 @@
       "appleTeamId": "QGLA89KHM7",
       "entitlements": {
         "com.apple.developer.kernel.extended-virtual-addressing": true
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
