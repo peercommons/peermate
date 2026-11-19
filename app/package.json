@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
     "@peermate/core": "file:../core",
     "b4a": "^1.9.0",
     "bare-stow-runtime": "^0.1.2",

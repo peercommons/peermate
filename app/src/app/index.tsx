@@ -1,20 +1,18 @@
 // Home: start a game vs the CPU or pass & play (SPECS §2.1).
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Link, router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { LEVELS } from '@peermate/core';
 import { latestUnfinished, type GameRecord } from '../storage/games';
 import { formatDate } from '../game/format';
 import { ui } from '../theme';
 import { engineAvailable, ENGINE_UNAVAILABLE } from '../engine/arasan';
 import { useOnline } from '../net/online';
-import { useUnread } from '../net/messages';
 
 type ColorChoice = 'w' | 'b' | 'random';
 
 export default function Home() {
   const [level, setLevel] = useState(3);
-  const unreadTotal = Object.values(useUnread()).reduce((a, b) => a + b, 0);
   const [color, setColor] = useState<ColorChoice>('w');
   const [unfinished, setUnfinished] = useState<GameRecord | null>(null);
 
@@ -99,23 +97,6 @@ export default function Home() {
         <PrimaryButton label="Find an opponent" onPress={() => router.push('/online')} />
       </View>
 
-      <View style={styles.links}>
-        <Link href="/history" style={styles.link}>
-          Your games
-        </Link>
-        <Link href="/friends" style={styles.link}>
-          {unreadTotal ? `Friends (${unreadTotal} new)` : 'Friends'}
-        </Link>
-        <Link href="/settings" style={styles.link}>
-          Settings
-        </Link>
-        <Link href="/dev" style={styles.devLink}>
-          Dev tools
-        </Link>
-        <Link href="/relays" style={styles.devLink}>
-          Relay check
-        </Link>
-      </View>
     </ScrollView>
   );
 }
@@ -171,7 +152,4 @@ const styles = StyleSheet.create({
   primary: { backgroundColor: ui.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center', marginTop: 6 },
   primaryText: { color: ui.accentText, fontSize: 16, fontWeight: '700' },
   continueCard: { borderColor: ui.accent, borderWidth: 1.5 },
-  links: { flexDirection: 'row', justifyContent: 'center', gap: 16 },
-  link: { color: ui.accent, fontWeight: '700', padding: 8, fontSize: 15 },
-  devLink: { color: ui.subtle, textAlign: 'center', padding: 8 },
 });

@@ -1,6 +1,7 @@
 import '../../polyfills'; // must run before anything that generates keys
 import { useEffect, useRef } from 'react';
-import { Alert } from 'react-native';
+import { Alert, View } from 'react-native';
+import { Footer } from '../components/Footer';
 import { Stack, router, usePathname } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { registerBackgroundCheck } from '../background';
@@ -91,26 +92,29 @@ export default function RootLayout() {
   return (
     <SettingsProvider>
       <StatusBar style="dark" />
-      <Stack
-        screenOptions={{
-          headerTintColor: ui.accent,
-          contentStyle: { backgroundColor: ui.background },
-        }}
-      >
-        <Stack.Screen name="index" options={{ title: 'Peermate' }} />
-        <Stack.Screen name="game" options={{ title: 'Game' }} />
-        <Stack.Screen name="review" options={{ title: 'Review' }} />
-        <Stack.Screen name="history" options={{ title: 'Your games' }} />
-        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-        <Stack.Screen name="online" options={{ title: 'Play online' }} />
-        <Stack.Screen name="online-game" options={{ title: 'Online game', gestureEnabled: false }} />
-        <Stack.Screen name="dev" options={{ title: 'Dev tools' }} />
-        <Stack.Screen name="relays" options={{ title: 'Relay check' }} />
-        <Stack.Screen name="friends" options={{ title: 'Friends' }} />
-        <Stack.Screen name="p/[key]" options={{ title: 'Friend link' }} />
-        <Stack.Screen name="scan" options={{ title: 'Scan QR code' }} />
-        <Stack.Screen name="chat/[key]" options={{ title: 'Messages' }} />
-      </Stack>
+      <View style={{ flex: 1, backgroundColor: ui.background }}>
+        <Stack
+          screenOptions={{
+            headerTintColor: ui.accent,
+            contentStyle: { backgroundColor: ui.background },
+          }}
+        >
+          <Stack.Screen name="index" options={{ title: 'Peermate' }} />
+          <Stack.Screen name="game" options={{ title: 'Game' }} />
+          <Stack.Screen name="review" options={{ title: 'Review' }} />
+          <Stack.Screen name="history" options={{ title: 'Your games' }} />
+          <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+          <Stack.Screen name="online" options={{ title: 'Play online' }} />
+          <Stack.Screen name="online-game" options={{ title: 'Online game', gestureEnabled: false }} />
+          <Stack.Screen name="dev" options={{ title: 'Dev tools' }} />
+          <Stack.Screen name="relays" options={{ title: 'Relay check' }} />
+          <Stack.Screen name="friends" options={{ title: 'Friends' }} />
+          <Stack.Screen name="p/[key]" options={{ title: 'Friend link' }} />
+          <Stack.Screen name="scan" options={{ title: 'Scan QR code' }} />
+          <Stack.Screen name="chat/[key]" options={{ title: 'Messages' }} />
+        </Stack>
+        <Footer />
+      </View>
     </SettingsProvider>
   );
 }
