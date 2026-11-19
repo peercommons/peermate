@@ -87,8 +87,15 @@ export type Invite = {
 
 /** A friend's last presence note (SPECS §6.5). */
 export type Presence = { status: PresenceStatus; at: number };
-/** How often we tell each friend we're around, and how long a note counts. */
+/**
+ * How often we tell a friend who is online that we're around, and how long a
+ * note counts. Friends who look offline only get a note every
+ * PRESENCE_OFFLINE_EVERY_MS: when they come online they announce themselves,
+ * and we answer at once (PRESENCE_ANSWER_AFTER_MS), so the slow round is only a
+ * safety net for a lost note.
+ */
 const PRESENCE_EVERY_MS = 60_000;
+const PRESENCE_OFFLINE_EVERY_MS = 300_000;
 export const PRESENCE_FRESH_MS = 120_000;
 /** When a friend's note arrives and we haven't told them for this long, answer at once. */
 const PRESENCE_ANSWER_AFTER_MS = 30_000;
@@ -615,7 +622,7 @@ class OnlineController {
    */
   async listen(): Promise<void> {
     this.listening = true;
-    if (this.relay && this.dms) return this.announce(); // e.g. a friend was just added
+    if (this.relay && this.dms) return this.greetNew(); // e.g. a friend was just added
     try {
       const me = await loadMe();
       const { relay } = this.openTransports(me, null); // the worker joins when it's ready
@@ -631,11 +638,12 @@ class OnlineController {
       }
       if (!this.dms) {
         // First time on this device: the last 30 days (relays keep messages a while).
-        const since = syncedTo() || Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
-        log('fetching messages since', new Date(since * 1000).toISOString(), 'from', friends().length, 'friend(s)');
+        const first = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+        const since = () => syncedTo() || first; // reconnects resume from the newest stored message
+        log('fetching messages since', new Date(since() * 1000).toISOString(), 'from', friends().length, 'friend(s)');
         this.dms = relay.receiveDMs(since, (dm) => this.onDM(dm));
       }
-      this.presenceTimer ??= setInterval(() => this.announce(), PRESENCE_EVERY_MS);
+      this.presenceTimer ??= setInterval(() => this.presenceRound(), PRESENCE_EVERY_MS);
       this.announce();
       this.showOfflineInvite();
     } catch (err) {
@@ -725,11 +733,32 @@ class OnlineController {
     return this.state.phase === 'game' && !this.state.end ? 'playing' : 'online';
   }
 
-  /** Tells every friend we're around (or `status`), through the relays. */
+  /** Tells every friend we're around (or `status`), through the relays: on start and on a status change. */
   private announce(status: PresenceStatus = this.myStatus()) {
-    if (!this.relay) return;
+    this.tell(friends(), status);
+  }
+
+  /** The periodic keep-alive: friends who are online every round, the others now and then. */
+  private presenceRound() {
     const now = Date.now();
-    for (const f of friends()) {
+    this.tell(
+      friends().filter(
+        (f) =>
+          presenceOf(this.presence.get(f.key), now) !== 'offline' ||
+          now - (this.toldAt.get(f.key) ?? 0) >= PRESENCE_OFFLINE_EVERY_MS - 5_000,
+      ),
+    );
+  }
+
+  /** Friends we've never told (one just added): tell them now. */
+  private greetNew() {
+    this.tell(friends().filter((f) => !this.toldAt.has(f.key)));
+  }
+
+  private tell(to: readonly { key: string; npub: string }[], status: PresenceStatus = this.myStatus()) {
+    if (!this.relay || to.length === 0) return;
+    const now = Date.now();
+    for (const f of to) {
       this.relay.sendPresence(f.npub, status);
       this.toldAt.set(f.key, now);
     }

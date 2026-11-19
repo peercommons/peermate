@@ -318,14 +318,20 @@ export class RelayNet {
   }
 
   /**
-   * Private messages to us since `sinceS` (unix seconds). Gift wraps carry a
+   * Private messages to us since `sinceS` (unix seconds, or a function read on each
+   * resubscribe). Gift wraps carry a
    * randomised timestamp up to 2 days in the past (NIP-59), hence the margin.
    */
-  receiveDMs(sinceS: number, onDM: (dm: { id: string; from: string; text: string; at: number }) => void): { close(): void } {
+  receiveDMs(
+    sinceS: number | (() => number),
+    onDM: (dm: { id: string; from: string; text: string; at: number }) => void,
+  ): { close(): void } {
     const seen = new Set<string>();
+    const since = typeof sinceS === 'function' ? sinceS : () => sinceS;
     return this.resilient(
       'messages',
-      () => ({ kinds: [1059], '#p': [this.npub], since: Math.max(1, sinceS - 2 * 24 * 3600 - 600) }),
+      // Read on every (re)subscribe, so a reconnect doesn't fetch what we already have again.
+      () => ({ kinds: [1059], '#p': [this.npub], since: Math.max(1, since() - 2 * 24 * 3600 - 600) }),
       (e) => {
         let rumor: { id: string; pubkey: string; kind: number; content: string; created_at: number };
         try {
