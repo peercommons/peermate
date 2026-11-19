@@ -64,6 +64,34 @@ def ensure_no_placeholders!(dir)
   UI.user_error!("Fill in the {{…}} placeholders first:\n  #{hits.map { |f| f.sub("#{META_DIR}/", '') }.join("\n  ")}")
 end
 
+# dist/ gains a file (plus dSYMs) per build. After each build keep the newest
+# DIST_KEEP of each kind (sideload APK, AAB, development IPA, App Store IPA) and
+# delete the rest; App Store dSYMs are uploaded with the build anyway.
+DIST_KEEP = 3
+
+def prune_dist
+  kinds = {
+    apk: /\Apeermate-.+-(\d+)\.apk\z/,
+    aab: /\Apeermate-.+-(\d+)\.aab\z/,
+    ipa: /\Apeermate-.+-(\d+)\.(?:ipa|app\.dSYM\.zip)\z/,
+    appstore: /\Apeermate-.+-(\d+)-appstore\.(?:ipa|app\.dSYM\.zip)\z/
+  }
+  removed = 0
+  files = Dir.children(DIST_DIR)
+  kinds.each_value do |re|
+    builds = files.filter_map { |f| f[re, 1]&.to_i }.uniq.sort.reverse
+    old = builds.drop(DIST_KEEP)
+    files.each do |f|
+      n = f[re, 1]&.to_i
+      next unless n && old.include?(n)
+
+      File.delete(File.join(DIST_DIR, f))
+      removed += 1
+    end
+  end
+  UI.message("dist/: removed #{removed} old build file(s), kept the newest #{DIST_KEEP} of each kind") if removed.positive?
+end
+
 default_platform(:android)
 
 # --------------------------------------------------------------------------
@@ -113,6 +141,7 @@ platform :android do
     apk = File.join(DIST_DIR, "peermate-#{version}-#{code}.apk")
     FileUtils.cp(lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH], apk)
     UI.success("APK ready: #{apk}")
+    prune_dist
 
     if options[:publish]
       require_env!('GITHUB_TOKEN', 'PEERMATE_GITHUB_REPO')
@@ -140,6 +169,7 @@ platform :android do
     aab = File.join(DIST_DIR, "peermate-#{marketing_version}-#{code}.aab")
     FileUtils.cp(lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH], aab)
     UI.success("AAB ready: #{aab}")
+    prune_dist
     aab
   end
 
@@ -317,6 +347,7 @@ platform :ios do
     )
     ipa = File.join(DIST_DIR, name)
     UI.success("IPA ready: #{ipa}")
+    prune_dist
 
     unless options[:install] == false
       udid = ios_device
@@ -377,6 +408,7 @@ platform :ios do
     )
     ipa = File.join(DIST_DIR, name)
     UI.success("IPA ready: #{ipa}")
+    prune_dist
     ipa
   end
 
