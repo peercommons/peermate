@@ -17,7 +17,7 @@ export default function DemoScreen() {
       return;
     }
     seedDemo().then(
-      () => router.replace('/'),
+      () => router.dismissTo('/'), // back to the Home underneath, not a second one
       (err) => setMessage((err as Error).message),
     );
   }, [game]);

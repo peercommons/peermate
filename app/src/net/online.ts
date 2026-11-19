@@ -1246,11 +1246,19 @@ class OnlineController {
       chat: [],
       version: 0,
     });
+    // Each move only once both sides have the previous one (signing and
+    // checking take a while on a slow device).
+    const session = this.session;
+    const inSync = async () => {
+      for (let i = 0; i < 100 && session.ply !== them.ply; i++) await new Promise((r) => setTimeout(r, 50));
+    };
     for (const uci of opts.moves) {
-      if (this.session.chess.turn() === 'w') this.move(uci);
+      await inSync();
+      if (this.session !== session) return; // left the demo game
+      if (session.chess.turn() === 'w') this.move(uci);
       else them.move(uci);
-      await new Promise((r) => setTimeout(r, 120)); // delivered and acknowledged
     }
+    await inSync();
   }
 
   /** The player's answer to "publish your rated games?" (asked once). */

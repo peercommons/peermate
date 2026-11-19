@@ -38,14 +38,12 @@ trap 'bar exit; "${ADB[@]}" shell settings put global sysui_demo_allowed 0' EXIT
 open() { "${ADB[@]}" shell am start -W -a android.intent.action.VIEW -d "$1" "$PKG" >/dev/null; sleep "${2:-3}"; }
 shot() { "${ADB[@]}" exec-out screencap -p > "$OUT/$1.png"; echo "  $1"; }
 
-"${ADB[@]}" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+"${ADB[@]}" shell am start -W -n "$PKG/.MainActivity" >/dev/null
 sleep 8
 open "peermate://demo" 6
 echo "Capturing:"
 shot 1_home
-open "peermate://demo?game=1" 7          # the moves play out over ~3 s
-shot 2_online_game
-open "peermate://game?resume=demo-cpu" 4
+open "peermate://game?resume=demo-cpu" 8   # the engine starts up first
 shot 3_vs_computer
 open "peermate://friends" 3
 shot 4_friends
@@ -55,4 +53,6 @@ open "peermate://online" 3
 shot 6_play_online
 open "peermate://history" 3
 shot 7_games
+open "peermate://demo?game=1" 12           # the sample moves play out first
+shot 2_online_game
 echo "Saved to $OUT"
