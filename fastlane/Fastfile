@@ -475,7 +475,8 @@ platform :ios do
       # Export compliance (the app encrypts games and chat end to end): answered by the
       # developer in App Store Connect, or set ITSAppUsesNonExemptEncryption in app.json
       # once decided. Not guessed here.
-      submission_information: { add_id_info_uses_idfa: false }
+      # No licensed third-party content (music, video, images); code licences are in the in-app notices.
+      submission_information: { add_id_info_uses_idfa: false, content_rights_contains_third_party_content: false }
     )
   end
 end

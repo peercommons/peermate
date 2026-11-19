@@ -2,7 +2,7 @@ Peermate needs no account or sign-in.
 
 PLAY THE COMPUTER (works offline): Home > New game > choose a level and colour. After a game, open it under Games to see the move-by-move review.
 
-PLAY ONLINE: games run directly between two phones (peer to peer), so online play needs a second player. The quickest way to test is two devices with Peermate installed: on both, open Online and start a Quick match with the same time control; they pair within a few seconds. Friends: on one device open Friends > Show my QR code, and on the other Friends > Scan their QR code; then chat or challenge from the friend's page.
+PLAY ONLINE: games run directly between two phones (peer to peer), so online play needs a second player. During review we keep a test opponent online for every time control: on a single device, open Online and start a Quick match with any time control, and "Test opponent" joins within a few seconds (it plays random moves). With two devices, on both open Online and start a Quick match with the same time control; they pair within a few seconds. Friends: on one device open Friends > Show my QR code, and on the other Friends > Scan their QR code; then chat or challenge from the friend's page.
 
 There is no Peermate server. When a direct connection isn't possible, game messages travel encrypted through public Nostr relays. Chat between opponents is limited to preset quick messages; free-text chat is only between friends who added each other by QR code. Players can block or report an opponent from the game screen ("Block or report <name>"). A report blocks them and opens the share sheet with the player's ID, the moves and the chat, to send to support@peercommons.org.
 

@@ -3,7 +3,7 @@
 // with whoever wants the same time control, and plays random legal moves
 // (captures first) after a short think.
 //
-//   npm run play-peer -- [timeControl] [--relay-only] [--room NAME] [--think MS] [--max-plies N]
+//   npm run play-peer -- [timeControl] [--relay-only] [--room NAME] [--think MS] [--max-plies N] [--nick NAME]
 //
 // --relay-only skips Hyperswarm entirely, to test the relay fallback as if
 // hole-punching had failed. --room seeks in a private room instead of the public
@@ -40,10 +40,10 @@ const room = option('--room')
 const thinkMs = Number(option('--think') ?? 2000)
 const maxPlies = Number(option('--max-plies') ?? Infinity)
 const seedHex = option('--seed') // 64 hex chars: a fixed identity across runs (e.g. to test blocking)
-const valued = new Set(['--room', '--think', '--max-plies', '--seed'].flatMap((n) => [option(n)]))
+const valued = new Set(['--room', '--think', '--max-plies', '--seed', '--nick'].flatMap((n) => [option(n)]))
 const tc = args.find((a) => !a.startsWith('--') && !valued.has(a)) ?? '5+0'
 const identity = deriveIdentity(seedHex ? Buffer.from(seedHex, 'hex') : newSeed())
-const nick = relayOnly ? 'Relay bot' : 'Desktop bot'
+const nick = option('--nick') ?? (relayOnly ? 'Relay bot' : 'Desktop bot')
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 const rooms = [room ?? lobbyRoom(timeControlClass(tc), 'any')]
 
