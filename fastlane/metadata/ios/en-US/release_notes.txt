@@ -1,1 +1,7 @@
-First release.
+Quick Match
+• The waiting screen now counts only players looking for the same time control.
+• Pairing is faster and more reliable.
+
+Friends and messages
+• Messages to friends arrive more reliably: relays that accept messages but never deliver them are now skipped.
+• Online status uses less data and battery.
