@@ -251,6 +251,32 @@ def ios_prebuild(code)
     # (It also resets ENV, so the build number is passed explicitly.)
     sh("cd #{APP_DIR} && CI=1 PEERMATE_VERSION_CODE=#{code} npx expo prebuild -p ios --clean && git checkout tsconfig.json")
   end
+  fix_barekit_plist
+end
+
+IOS_DERIVED_DATA = File.join(APP_DIR, 'ios/build')
+
+# BareKit (Hyperswarm's runtime, Swift package bare-kit-swift) ships an
+# Info.plist without CFBundleShortVersionString, and CFBundleVersion is the
+# unexpanded "MACOSX_FRAMEWORK_SHORT_VERSION_STRING". Development builds don't
+# mind; App Store validation rejects the upload (error 90057). Resolve the
+# packages, then write the package's real version into the (unsigned)
+# xcframework before the build copies it into the app.
+def fix_barekit_plist
+  sh("xcodebuild -resolvePackageDependencies -workspace #{File.join(APP_DIR, 'ios/Peermate.xcworkspace')} " \
+     "-scheme Peermate -derivedDataPath #{IOS_DERIVED_DATA} >/dev/null")
+  state = JSON.parse(File.read(File.join(IOS_DERIVED_DATA, 'SourcePackages/workspace-state.json')))
+  dep = state.dig('object', 'dependencies').find { |d| d.dig('packageRef', 'identity') == 'bare-kit-swift' }
+  version = dep&.dig('state', 'checkoutState', 'version')
+  UI.user_error!('bare-kit-swift version not found after package resolution') if version.to_s.empty?
+  plists = Dir.glob(File.join(IOS_DERIVED_DATA, 'SourcePackages/artifacts/bare-kit-swift/**/BareKit.framework/Info.plist'))
+  UI.user_error!('BareKit.xcframework not found after package resolution') if plists.empty?
+  plists.each do |p|
+    %w[CFBundleShortVersionString CFBundleVersion].each do |key|
+      sh('plutil', '-replace', key, '-string', version, p, log: false)
+    end
+  end
+  UI.message("BareKit #{version}: version keys set in #{plists.size} Info.plist(s)")
 end
 
 # App Store Connect API key (no Apple ID password or 2FA). The .p8 is either a
@@ -283,7 +309,7 @@ platform :ios do
       export_team_id: IOS_TEAM_ID,
       xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{IOS_TEAM_ID}",
       export_xcargs: '-allowProvisioningUpdates',
-      derived_data_path: File.join(APP_DIR, 'ios/build'),
+      derived_data_path: IOS_DERIVED_DATA,
       output_directory: DIST_DIR,
       output_name: name,
       skip_profile_detection: true,
@@ -344,7 +370,7 @@ platform :ios do
       export_method: 'app-store',
       export_team_id: IOS_TEAM_ID,
       export_options: { provisioningProfiles: { BUNDLE_ID => profile } },
-      derived_data_path: File.join(APP_DIR, 'ios/build'),
+      derived_data_path: IOS_DERIVED_DATA,
       output_directory: DIST_DIR,
       output_name: name,
       include_symbols: true
