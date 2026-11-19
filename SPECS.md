@@ -645,6 +645,7 @@ One device and one carrier: keep collecting results from testers on other carrie
 - `android beta status:draft` is needed until Play has reviewed the app once.
 - Settings are in `fastlane/.env.example`.
 - **iOS live (2026-11-19):** `ios certs setup:true` created the Apple Distribution certificate and the "match AppStore com.peermate.app" profile. They're stored in the private `peercommons/certificates` repo. `ios beta` uploaded build 0.1.0 (84) to TestFlight (app ID 6836654483); it was processed in 4 minutes, and the changelog was set. The first upload was rejected (90057): BareKit's Info.plist lacks `CFBundleShortVersionString`. `fix_barekit_plist` now resolves the Swift packages and writes bare-kit-swift's version into the unsigned xcframework before every iOS build.
+- **Submitted for App Store review (2026-11-19 15:11):** version 0.1.0, build 89, with the new icon and iPhone only. Manual release, phased. App Privacy says "Data not collected". `app/tools/review-bots.sh` keeps a "Test opponent" in every Quick Match time control during review; stop it after approval.
 
 **Shared**
 - Auth: **App Store Connect API key** (`app_store_connect_api_key`, `.p8` in CI secret) and **Google Play service-account JSON**. No Apple ID passwords / 2FA in CI.
