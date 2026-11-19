@@ -5,6 +5,7 @@ import { useFocusEffect } from 'expo-router';
 import { cleanNick, getBackupPhrase, loadMe, NICK_MAX, restoreFromPhrase, setNick, type Me } from '../net/profile';
 import { unblock, useBlocked } from '../net/blocklist';
 import { online } from '../net/online';
+import { usePublishPref } from '../net/results';
 import { rekeyWorker } from '../net/worker';
 import { useSettings, type BoardThemeName, type Settings } from '../settings';
 import { BOARD_THEMES, ui } from '../theme';
@@ -64,7 +65,33 @@ export default function SettingsScreen() {
           />
         </View>
       ))}
+      <PublishSection />
     </ScrollView>
+  );
+}
+
+/** NIP-64 publishing of co-signed games (SPECS §7.5). */
+function PublishSection() {
+  const pref = usePublishPref();
+  return (
+    <>
+      <Text style={styles.section}>Online games</Text>
+      <View style={styles.row}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.label}>Publish my rated games</Text>
+          <Text style={styles.hint}>
+            Lets opponents check that your rating is real. Games go on public Nostr relays for good: both players' IDs,
+            the moves, the result and the date.
+          </Text>
+        </View>
+        <Switch
+          value={pref === 'yes'}
+          onValueChange={(v) => online.answerPublish(v)}
+          trackColor={{ true: ui.accent }}
+          accessibilityLabel="Publish my rated games"
+        />
+      </View>
+    </>
   );
 }
 

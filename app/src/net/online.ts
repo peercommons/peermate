@@ -22,6 +22,8 @@ import {
   lobbyRoom,
   Matchmaker,
   HELLO_TIMEOUT_MS,
+  checkCosigned,
+  type Rating,
   timeControlClass,
   toPgn,
   type Color,
@@ -54,6 +56,7 @@ import {
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
 import './relayHealthStore'; // saved relay health, before any relay connection
 import { startMuteListSync } from './mutelist';
+import { addResult, publishPending, publishPref, setPublishPref, spotCheckRating } from './results';
 import { loadMe, type Me } from './profile';
 import { RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';
 import { getWorker, type P2PWorker, type WorkerEvent } from './worker';
@@ -103,7 +106,14 @@ export type OnlineState =
       phase: 'game';
       tc: string;
       myColor: Color;
-      opponent: { key: string; nick: string; fingerprint: string; rating: string | null };
+      opponent: {
+        key: string;
+        nick: string;
+        fingerprint: string;
+        rating: string | null;
+        /** Their rating spot-checked against their published games (SPECS §7.5); null: not checked / nothing published. */
+        verified?: 'verified' | 'unverified' | null;
+      };
       connection: Connection;
       /** After a rated game: our rating before and after (SPECS §7.5). */
       ratingChange: { before: number; after: number; shown: string } | null;
@@ -111,6 +121,8 @@ export type OnlineState =
       drawOffered: boolean;
       notice: string | null;
       chat: ChatLine[];
+      /** Both sides signed the result, and we haven't asked yet whether to publish games. */
+      askPublish?: boolean;
       /** Bumps on every change, so screens re-read the session. */
       version: number;
     }
@@ -196,6 +208,10 @@ class OnlineController {
   /** The one peer a friend-challenge matchmaker is pairing with. */
   private matchmakerPeer: string | null = null;
   private muteSyncStarted = false;
+  /** The finished game's signed RESULTs (ours, theirs) until both are in (SPECS §7.5). */
+  private resultWires: { gid: string; mine?: string; theirs?: string; pgn?: string; cls?: string } | null = null;
+  /** Our rating before the game just rated (signed into our RESULT). */
+  private ratedBefore: Rating | null = null;
   /** When the current matchmaker was last told about each relay peer (ms). */
   private relayPeers = new Map<string, number>();
   /** The friend our current challenge also went to as a message (sent once). */
@@ -399,6 +415,7 @@ class OnlineController {
       return;
     }
     if (this.isOpponent(peer)) {
+      if (wire.includes('"t":"RESULT"')) this.onTheirResult(wire);
       this.match!.channel.receive(wire);
       // First word from the opponent after a resume: we're back in touch.
       if (this.state.phase === 'game' && this.state.notice === RECONNECTING) {
@@ -609,6 +626,7 @@ class OnlineController {
       if (!this.muteSyncStarted) {
         this.muteSyncStarted = true;
         startMuteListSync(log); // the block list from/to the relays (NIP-51)
+        void publishPending(log); // co-signed games not yet on the relays (if the player said yes)
       }
       if (!this.dms) {
         // First time on this device: the last 30 days (relays keep messages a while).
@@ -1054,6 +1072,7 @@ class OnlineController {
       chat: [],
       version: 0,
     });
+    void this.spotCheck(m, timeControlClass(tc));
   }
 
   private onSessionEvent(e: SessionEvent) {
@@ -1089,6 +1108,7 @@ class OnlineController {
         this.patchGame({ end: e.end, drawOffered: false, notice: null, ratingChange: this.rate(e.end) });
         this.announce(); // back to "online"
         void this.saveFinished(e.end);
+        void this.sendResult(e.end);
         return;
     }
   }
@@ -1108,8 +1128,86 @@ class OnlineController {
     const cls = timeControlClass(this.state.tc);
     const res = applyResult(m.game.start.gid, cls, sanitizeOpponent(m.opponent.rating, m.opponent.rd), score);
     if (!res) return null;
+    this.ratedBefore = res.before;
     log('rating', cls, Math.round(res.before.r), '->', Math.round(res.after.r));
     return { before: res.before.r, after: res.after.r, shown: formatRating(res.after) };
+  }
+
+  /**
+   * Signs the result of a decided game and sends it (SPECS §7.5). With the
+   * opponent's, it's the co-signed record that can be published as NIP-64.
+   * Aborted, one-sided and protocol-violation endings aren't signed.
+   */
+  private async sendResult(end: GameEnd) {
+    const s = this.session;
+    const m = this.match;
+    if (!s || !m || end.aborted || end.unconfirmed || end.violation || !end.outcome) return;
+    const gid = m.game.start.gid;
+    const cls = timeControlClass(this.state.phase === 'game' ? this.state.tc : m.game.start.tc);
+    const me = await loadMe();
+    if (this.match !== m) return;
+    const before = this.ratedBefore;
+    this.ratedBefore = null;
+    const names = { [s.myColor]: me.profile.nick, [s.myColor === 'w' ? 'b' : 'w']: m.opponent.nick } as Record<Color, string>;
+    const seq = m.channel.send({
+      t: 'RESULT',
+      winner: end.outcome.winner ?? 'draw',
+      reason: end.outcome.reason.slice(0, 32),
+      hash: s.moveHash,
+      plies: s.ply,
+      color: s.myColor,
+      npub: me.identity.nostr.publicKey,
+      cls,
+      ...(before ? { r: Math.round(before.r), rd: Math.round(before.rd), vol: before.vol } : {}),
+    });
+    const mine = m.channel.sentWire(seq);
+    if (!mine) return;
+    const pgn = toPgn(s.chess, { white: names.w, black: names.b, event: `Peermate online ${m.game.start.tc}` }, end.outcome);
+    this.resultWires = { ...(this.resultWires?.gid === gid ? this.resultWires : { gid }), mine, pgn, cls };
+    log('result signed', gid.slice(0, 8));
+    this.completeResult();
+  }
+
+  /** The opponent's signed RESULT (it may arrive before our own game end). */
+  private onTheirResult(wire: string) {
+    const env = decode(wire);
+    const gid = this.match?.game.start.gid;
+    if (!env || env.body.t !== 'RESULT' || !gid || env.gid !== gid) return;
+    this.resultWires = { ...(this.resultWires?.gid === gid ? this.resultWires : { gid }), theirs: wire };
+    this.completeResult();
+  }
+
+  /** Both RESULTs in: check them, keep the record, maybe publish or ask. */
+  private completeResult() {
+    const w = this.resultWires;
+    if (!w?.mine || !w.theirs || !w.pgn || !w.cls) return;
+    this.resultWires = null;
+    const c = checkCosigned(w.mine, w.theirs);
+    if (!c) return log('result: signatures or outcomes disagree; not kept');
+    log('result co-signed', w.gid.slice(0, 8));
+    addResult({ gid: w.gid, cls: w.cls, mine: w.mine, theirs: w.theirs, pgn: w.pgn, at: c.at }, log);
+    if (publishPref() === null && this.state.phase === 'game' && this.state.end) this.patchGame({ askPublish: true });
+  }
+
+  /** The player's answer to "publish your rated games?" (asked once). */
+  answerPublish(yes: boolean): void {
+    setPublishPref(yes ? 'yes' : 'no', log);
+    if (this.state.phase === 'game') this.patchGame({ askPublish: false });
+  }
+
+  /** Spot-checks the opponent's advertised rating against their published games. */
+  private async spotCheck(m: Match, cls: string) {
+    const { npub, rating, rd } = m.opponent;
+    if (!npub || rating === undefined || rd === undefined) return;
+    try {
+      const check = await spotCheckRating(npub, cls, { r: rating, rd });
+      log('spot-check', m.opponent.nick, cls, check.status, 'why' in check ? check.why : '');
+      if (this.match !== m || this.state.phase !== 'game') return;
+      const verified = check.status === 'none' ? null : check.status;
+      this.patchGame({ opponent: { ...this.state.opponent, verified } });
+    } catch (err) {
+      log('spot-check failed:', String(err));
+    }
   }
 
   private async saveFinished(end: GameEnd) {

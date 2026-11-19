@@ -39,6 +39,24 @@ export type Message =
   | { t: 'FLAG_CLAIM'; ply: number }
   | { t: 'FLAG_RESP'; ply: number; accept: boolean }
   | { t: 'CHAT'; text?: string; quick?: string }
+  /**
+   * After a decided game, each side signs the result (SPECS §7.5). The two signed
+   * envelopes together are the co-signed record published as NIP-64. `r`/`rd`/
+   * `vol` are the sender's rating for `cls` before the game (unrated: absent).
+   */
+  | {
+      t: 'RESULT';
+      winner: 'w' | 'b' | 'draw';
+      reason: string;
+      hash: string;
+      plies: number;
+      color: 'w' | 'b';
+      npub: string;
+      cls: string;
+      r?: number;
+      rd?: number;
+      vol?: number;
+    }
   // Unreliable (not acked, not retransmitted):
   | { t: 'ACK'; seq: number }
   | { t: 'SYNC'; delivered: number }
@@ -130,6 +148,12 @@ const BODY_CHECKS: Record<MessageType, (b: Record<string, unknown>) => boolean> 
   FLAG_RESP: (b) => isInt(b.ply) && typeof b.accept === 'boolean',
   CHAT: (b) => (b.text === undefined || isStr(b.text, MAX_CHAT_LENGTH)) && (b.quick === undefined || isStr(b.quick, 32)) &&
     (b.text !== undefined) !== (b.quick !== undefined),
+  RESULT: (b) =>
+    (b.winner === 'w' || b.winner === 'b' || b.winner === 'draw') && isStr(b.reason, 32) &&
+    isStr(b.hash) && HEX64.test(b.hash) && isInt(b.plies) && b.plies >= 0 &&
+    (b.color === 'w' || b.color === 'b') && isStr(b.npub) && HEX64.test(b.npub) && isStr(b.cls, 16) &&
+    (b.r === undefined || isInt(b.r)) && (b.rd === undefined || isInt(b.rd)) &&
+    (b.vol === undefined || (typeof b.vol === 'number' && Number.isFinite(b.vol) && b.vol > 0 && b.vol < 1)),
   ACK: (b) => isInt(b.seq) && b.seq >= 1,
   SYNC: (b) => isInt(b.delivered) && b.delivered >= 0,
   PING: (b) => isStr(b.nonce, 32),

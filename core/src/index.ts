@@ -13,3 +13,4 @@ export * from './net/router.ts';
 export * from './net/report.ts';
 export * from './rating.ts';
 export * from './net/relayHealth.ts';
+export * from './net/result.ts';

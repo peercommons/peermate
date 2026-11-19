@@ -98,6 +98,11 @@ export class ReliableChannel {
     return this.outbox.size;
   }
 
+  /** The signed wire of a reliable message we sent (recent ones only). */
+  sentWire(seq: number): string | undefined {
+    return this.sent.get(seq);
+  }
+
   /** Sends a message; returns its seq (0 for unreliable messages or a closed channel). */
   send(body: Message): number {
     if (this.closed) return 0;

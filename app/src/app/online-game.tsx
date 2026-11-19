@@ -25,6 +25,9 @@ import { useFriends } from '../net/friends';
 import { useSettings } from '../settings';
 import { BOARD_THEMES, ui } from '../theme';
 
+/** After the opponent's rating: checked against their published games or not (SPECS §7.5). */
+const VERIFIED = { verified: ' ✓', unverified: ' (unverified)', none: '' } as const;
+
 const BADGE_COLOR: Record<Connection, string> = { direct: '#2e7d32', relayed: '#f9a825', reconnecting: '#c62828' };
 
 const QUICK_ORDER = ['hi', 'gl', 'hf', 'gg', 'thanks', 'wp', 'oops'] as const;
@@ -67,6 +70,22 @@ export default function OnlineGameScreen() {
     prevPly.current = ply;
     setSelected(null);
   }, [ply, settings.haptics]);
+
+  // After the first co-signed game: ask once whether to publish games (SPECS §7.5).
+  const askPublish = state.phase === 'game' && state.askPublish;
+  useEffect(() => {
+    if (!askPublish) return;
+    Alert.alert(
+      'Publish your rated games?',
+      'Opponents can then check that your rating is real. Each game goes on public Nostr relays for good: your Peermate ID, ' +
+        "your opponent's ID, the moves, the result and the date. You can change this in Settings.",
+      [
+        { text: 'Not now', style: 'cancel', onPress: () => online.answerPublish(false) },
+        { text: 'Publish', onPress: () => online.answerPublish(true) },
+      ],
+      { cancelable: false },
+    );
+  }, [askPublish]);
 
   // Claim the win as soon as the opponent's clock runs out (they must confirm).
   useEffect(() => {
@@ -166,7 +185,7 @@ export default function OnlineGameScreen() {
         name={names[top]}
         sub={
           top === them
-            ? `${state.opponent.rating ? `${state.opponent.rating} · ` : ''}${state.opponent.fingerprint}`
+            ? `${state.opponent.rating ? `${state.opponent.rating}${VERIFIED[state.opponent.verified ?? 'none']} · ` : ''}${state.opponent.fingerprint}`
             : undefined
         }
         clock={formatClock(clocks[top])}

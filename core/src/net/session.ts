@@ -399,6 +399,11 @@ export class GameSession {
     if (o) this.finish({ outcome: o });
   }
 
+  /** The move hash chain's head: commits to every move (signed into RESULT). */
+  get moveHash(): string {
+    return this.hash;
+  }
+
   private finish(end: GameEnd) {
     if (this.end) return;
     this.end = end;
