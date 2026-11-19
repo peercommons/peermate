@@ -87,21 +87,16 @@ export default function Home() {
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.heading}>Pass & play</Text>
-        <Text style={styles.subtle}>Two players on this device. The board turns for each move.</Text>
-        <PrimaryButton
-          label="Start game"
-          onPress={() => router.push({ pathname: '/game', params: { mode: 'local' } })}
-        />
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.heading}>Play online</Text>
-        <Text style={styles.subtle}>Find an opponent anywhere. Games run directly between phones, with no server.</Text>
-        <PrimaryButton label="Find an opponent" onPress={() => router.push('/online')} />
-      </View>
-
+      {/* Online play has its own tab in the footer; pass & play is a quieter option. */}
+      <Pressable
+        onPress={() => router.push({ pathname: '/game', params: { mode: 'local' } })}
+        style={({ pressed }) => [styles.secondary, pressed && { opacity: 0.6 }]}
+        accessibilityRole="button"
+        accessibilityHint="Two players on this device. The board turns for each move."
+      >
+        <Text style={styles.secondaryText}>Pass & play on this phone ›</Text>
+        <Text style={styles.subtle}>Two players, one device. The board turns for each move.</Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -157,4 +152,6 @@ const styles = StyleSheet.create({
   primary: { backgroundColor: ui.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center', marginTop: 6 },
   primaryText: { color: ui.accentText, fontSize: 16, fontWeight: '700' },
   continueCard: { borderColor: ui.accent, borderWidth: 1.5 },
+  secondary: { alignItems: 'center', gap: 2, paddingVertical: 8 },
+  secondaryText: { color: ui.accent, fontSize: 16, fontWeight: '700' },
 });
