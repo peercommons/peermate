@@ -1,3 +1,6 @@
+Sound
+• Moves, captures and checks have sounds, plus a chime when a game starts and ends, and a tick when your clock runs low. Turn them off in Settings.
+
 Easier to find your way
 • The back arrow on Online, Friends, Games and Settings now always returns to Home.
 • A tidier Home screen: play the computer first, pass & play as a link below.
