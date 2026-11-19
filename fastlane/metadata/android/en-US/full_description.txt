@@ -1,0 +1,33 @@
+Play chess your way: against the computer, with a friend on the same phone, or online with anyone, with no server in between.
+
+PLAY THE COMPUTER
+• 10 levels, from just-learning-the-moves to full engine strength
+• Play as White, Black or random
+• Undo moves, and review the game with move-by-move analysis when it ends
+
+PASS & PLAY
+• Two players, one phone; the board turns for each move
+
+PLAY ONLINE, PHONE TO PHONE
+• Quick Match pairs you with someone at a similar rating
+• Games run directly between the two phones. When a direct connection isn't possible, they go through public Nostr relays, still encrypted
+• Bullet, blitz, rapid and classical time controls, with clocks both phones agree on
+• Every move is signed, so a modified app can't rewrite the game
+
+FRIENDS
+• Add friends with a link or a QR code
+• See when friends are online, and challenge them to a game
+• Send private, end-to-end encrypted messages
+• Challenge a friend whose app is closed: they get a notification
+
+FAIR, VERIFIABLE RATINGS
+• A Glicko-2 rating for each time control, worked out on your phone
+• Both players sign every result. If you choose to publish your games, opponents can check that your rating is real
+
+PRIVATE BY DESIGN
+• No account, no sign-up, no ads, no analytics, no tracking
+• Your games and settings stay on your phone
+• Your online ID is a key made on your phone; a backup phrase restores it on a new one
+• Block and report players; your block list follows your ID, encrypted
+
+Peermate is free and has no in-app purchases.

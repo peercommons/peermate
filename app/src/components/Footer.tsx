@@ -34,6 +34,7 @@ const MORE: { label: string; icon: IconName; href: Href; match: (p: string) => b
   { label: 'Settings', icon: 'settings-outline', href: '/settings', match: (p) => p === '/settings' },
   { label: 'Relay check', icon: 'pulse-outline', href: '/relays', match: (p) => p === '/relays' },
   { label: 'Dev tools', icon: 'construct-outline', href: '/dev', match: (p) => p === '/dev' },
+  { label: 'Licences', icon: 'document-text-outline', href: '/licenses', match: (p) => p === '/licenses' },
 ];
 
 /** Screens that need the full height: no footer. */
@@ -130,7 +131,7 @@ function Tab({
           </View>
         )}
       </View>
-      <Text style={[styles.label, { color }]} numberOfLines={1}>
+      <Text style={[styles.label, { color }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
         {label}
       </Text>
     </Pressable>

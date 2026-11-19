@@ -108,6 +108,7 @@ export default function RootLayout() {
           <Stack.Screen name="online-game" options={{ title: 'Online game', gestureEnabled: false }} />
           <Stack.Screen name="dev" options={{ title: 'Dev tools' }} />
           <Stack.Screen name="relays" options={{ title: 'Relay check' }} />
+        <Stack.Screen name="licenses" options={{ title: 'Licences' }} />
           <Stack.Screen name="friends" options={{ title: 'Friends' }} />
           <Stack.Screen name="p/[key]" options={{ title: 'Friend link' }} />
           <Stack.Screen name="scan" options={{ title: 'Scan QR code' }} />

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
+import { announceMove } from '../game/speech';
 import * as Haptics from 'expo-haptics';
 import {
   AWAY_AFTER_MS,
@@ -66,6 +67,13 @@ export default function OnlineGameScreen() {
   useEffect(() => {
     if (ply > prevPly.current && settings.haptics) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    }
+    // Screen readers hear the opponent's moves.
+    const s = online.session;
+    if (ply > prevPly.current && s) {
+      const mover = ply % 2 === 1 ? 'w' : 'b';
+      const san = s.chess.history().at(-1);
+      if (mover !== s.myColor && san) announceMove(mover, san);
     }
     prevPly.current = ply;
     setSelected(null);

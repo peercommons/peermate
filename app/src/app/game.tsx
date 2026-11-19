@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
+import { announceMove } from '../game/speech';
 import * as Haptics from 'expo-haptics';
 import { describeOutcome, getLevel, type Color } from '@peermate/core';
 import { Board } from '../components/Board';
@@ -63,6 +64,11 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
   const moveCount = game.sanMoves.length;
   const prevCount = useRef(moveCount);
   useEffect(() => {
+    // Screen readers hear the computer's moves (and both sides' in pass & play).
+    if (moveCount > prevCount.current && lastSan) {
+      const mover: Color = moveCount % 2 === 1 ? 'w' : 'b';
+      if (mode.kind !== 'cpu' || mover !== mode.player) announceMove(mover, lastSan);
+    }
     if (settings.haptics && moveCount > prevCount.current && lastSan) {
       const strong = /[x+#]/.test(lastSan);
       Haptics.impactAsync(strong ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light).catch(
@@ -70,7 +76,7 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
       );
     }
     prevCount.current = moveCount;
-  }, [moveCount, lastSan, settings.haptics]);
+  }, [moveCount, lastSan, settings.haptics, mode]);
 
   const title = useMemo(
     () => (mode.kind === 'cpu' ? `vs CPU · Level ${mode.level} (${getLevel(mode.level).label})` : 'Pass & play'),

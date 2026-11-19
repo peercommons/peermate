@@ -223,9 +223,9 @@ const SquareView = memo(function SquareView(p: SquareProps) {
   const base = p.dark ? colors.dark : colors.light;
   const labelColor = p.dark ? colors.light : colors.dark;
   const overlay = p.check ? colors.check : p.selected ? colors.selected : p.last ? colors.lastMove : null;
-  const description = p.piece
-    ? `${p.square}, ${p.piece.color === 'w' ? 'white' : 'black'} ${PIECE_NAME[p.piece.type]}`
-    : p.square;
+  const description =
+    (p.piece ? `${p.square}, ${p.piece.color === 'w' ? 'white' : 'black'} ${PIECE_NAME[p.piece.type]}` : p.square) +
+    (p.check ? ', in check' : p.last ? ', last move' : '');
 
   return (
     // Touches are handled by the board's responder; screen readers activate squares directly.
@@ -242,10 +242,10 @@ const SquareView = memo(function SquareView(p: SquareProps) {
       {overlay && <View style={[StyleSheet.absoluteFill, { backgroundColor: overlay }]} />}
       {p.hover && <View style={[StyleSheet.absoluteFill, { borderWidth: p.size * 0.06, borderColor: colors.hint }]} />}
       {p.rankLabel && (
-        <Text style={[styles.rank, { color: labelColor, fontSize: p.size * 0.2 }]}>{p.rankLabel}</Text>
+        <Text maxFontSizeMultiplier={1} style={[styles.rank, { color: labelColor, fontSize: p.size * 0.2 }]}>{p.rankLabel}</Text>
       )}
       {p.fileLabel && (
-        <Text style={[styles.file, { color: labelColor, fontSize: p.size * 0.2 }]}>{p.fileLabel}</Text>
+        <Text maxFontSizeMultiplier={1} style={[styles.file, { color: labelColor, fontSize: p.size * 0.2 }]}>{p.fileLabel}</Text>
       )}
       {p.target &&
         (p.piece ? (
