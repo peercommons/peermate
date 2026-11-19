@@ -45,7 +45,7 @@ function save(next: Store) {
 }
 
 export function syncedTo(): number {
-  return store.syncedTo;
+  return Math.min(store.syncedTo, Math.floor(Date.now() / 1000)); // also for a cursor saved before the clamp
 }
 
 /** Adds a message (ignores one we already have), keeping the thread in time order. True if new. */
@@ -53,7 +53,10 @@ export function addMessage(friend: string, m: Message): boolean {
   const thread = store.threads[friend] ?? [];
   if (thread.some((x) => x.id === m.id)) return false;
   const next = [...thread, m].sort((a, b) => a.at - b.at).slice(-MAX_PER_FRIEND);
-  const syncedS = m.from === 'them' ? Math.max(store.syncedTo, Math.floor(m.at / 1000)) : store.syncedTo;
+  // The sync cursor (where the next fetch starts) never passes our own clock: a
+  // friend whose clock runs ahead would otherwise push it into the future and
+  // later messages, gift-wrapped with timestamps up to 2 days back, would be missed.
+  const syncedS = m.from === 'them' ? Math.max(store.syncedTo, Math.floor(Math.min(m.at, Date.now()) / 1000)) : store.syncedTo;
   save({ ...store, threads: { ...store.threads, [friend]: next }, syncedTo: syncedS });
   return true;
 }

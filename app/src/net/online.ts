@@ -88,15 +88,15 @@ export type Invite = {
 /** A friend's last presence note (SPECS §6.5). */
 export type Presence = { status: PresenceStatus; at: number };
 /**
- * How often we tell a friend who is online that we're around, and how long a
- * note counts. Friends who look offline only get a note every
+ * How often we tell a friend we've heard from lately that we're around, and how
+ * long a note counts. Friends silent for longer only get a note every
  * PRESENCE_OFFLINE_EVERY_MS: when they come online they announce themselves,
  * and we answer at once (PRESENCE_ANSWER_AFTER_MS), so the slow round is only a
  * safety net for a lost note.
  */
-const PRESENCE_EVERY_MS = 60_000;
+const PRESENCE_EVERY_MS = 45_000;
 const PRESENCE_OFFLINE_EVERY_MS = 300_000;
-export const PRESENCE_FRESH_MS = 120_000;
+export const PRESENCE_FRESH_MS = 150_000; // a single lost note never shows a friend offline
 /** When a friend's note arrives and we haven't told them for this long, answer at once. */
 const PRESENCE_ANSWER_AFTER_MS = 30_000;
 
@@ -738,13 +738,20 @@ class OnlineController {
     this.tell(friends(), status);
   }
 
-  /** The periodic keep-alive: friends who are online every round, the others now and then. */
+  /**
+   * The periodic keep-alive: every round to friends heard from in the last
+   * PRESENCE_OFFLINE_EVERY_MS (so a few lost notes heal within a round instead
+   * of both sides dropping to the slow round), the others now and then.
+   */
   private presenceRound() {
     const now = Date.now();
+    const list = friends();
+    const current = new Set(list.map((f) => f.key));
+    for (const key of this.toldAt.keys()) if (!current.has(key)) this.toldAt.delete(key); // removed: greet again if re-added
     this.tell(
-      friends().filter(
+      list.filter(
         (f) =>
-          presenceOf(this.presence.get(f.key), now) !== 'offline' ||
+          now - (this.presence.get(f.key)?.at ?? 0) < PRESENCE_OFFLINE_EVERY_MS ||
           now - (this.toldAt.get(f.key) ?? 0) >= PRESENCE_OFFLINE_EVERY_MS - 5_000,
       ),
     );
@@ -767,12 +774,15 @@ class OnlineController {
   private onPresence(npub: string, status: PresenceStatus) {
     const f = friendByNpub(npub);
     if (!f) return;
+    const was = presenceOf(this.presence.get(f.key));
+    const appeared = was === 'offline' || was === 'away'; // back from the background: their app may have missed our notes
     const next = new Map(this.presence);
     next.set(f.key, { status, at: Date.now() });
     this.presence = next;
     this.emit();
-    // They just showed up: answer now rather than at our next round.
-    if (status !== 'away' && Date.now() - (this.toldAt.get(f.key) ?? 0) > PRESENCE_ANSWER_AFTER_MS) {
+    // They just showed up: answer now rather than at our next round. Only then:
+    // answering every keep-alive doubled one side's notes.
+    if (appeared && status !== 'away' && Date.now() - (this.toldAt.get(f.key) ?? 0) > PRESENCE_ANSWER_AFTER_MS) {
       this.relay?.sendPresence(f.npub, this.myStatus());
       this.toldAt.set(f.key, Date.now());
     }
