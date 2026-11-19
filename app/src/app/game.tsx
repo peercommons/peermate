@@ -6,7 +6,8 @@ import { ScreenView } from '../components/ScreenView';
 import { announceMove } from '../game/speech';
 import * as Haptics from 'expo-haptics';
 import { describeOutcome, getLevel, type Color } from '@peermate/core';
-import { Board } from '../components/Board';
+import { Board, type BoardPiece } from '../components/Board';
+import { Captured } from '../components/Captured';
 import { PromotionPicker } from '../components/PromotionPicker';
 import { useGame, type GameMode, type ResumeFrom } from '../game/useGame';
 import { formatMoves } from '../game/format';
@@ -88,7 +89,13 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
     <ScreenView style={styles.root}>
       <Stack.Screen options={{ title }} />
 
-      <PlayerBar name={game.names[top]} active={!game.result && game.turn === top} thinking={game.thinking && game.turn === top} />
+      <PlayerBar
+        name={game.names[top]}
+        side={top}
+        position={game.position}
+        active={!game.result && game.turn === top}
+        thinking={game.thinking && game.turn === top}
+      />
 
       <View style={styles.boardWrap}>
         <Board
@@ -111,6 +118,8 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
 
       <PlayerBar
         name={game.names[orientation]}
+        side={orientation}
+        position={game.position}
         active={!game.result && game.turn === orientation}
         thinking={game.thinking && game.turn === orientation}
       />
@@ -183,12 +192,15 @@ function Status({ game }: { game: ReturnType<typeof useGame> }) {
   );
 }
 
-function PlayerBar({ name, active, thinking }: { name: string; active: boolean; thinking: boolean }) {
+function PlayerBar(p: { name: string; side: Color; position: BoardPiece[][]; active: boolean; thinking: boolean }) {
   return (
     <View style={styles.playerBar}>
-      <View style={[styles.dot, active && styles.dotActive]} />
-      <Text style={styles.playerName}>{name}</Text>
-      {thinking && <Text style={styles.subtle}>thinking…</Text>}
+      <View style={[styles.dot, p.active && styles.dotActive]} />
+      <Text style={styles.playerName} numberOfLines={1}>
+        {p.name}
+      </Text>
+      {p.thinking && <Text style={styles.subtle}>thinking…</Text>}
+      <Captured position={p.position} side={p.side} />
     </View>
   );
 }
@@ -208,10 +220,10 @@ function Control({ label, onPress, disabled }: { label: string; onPress: () => v
 const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: 8, paddingTop: 8, gap: 6 },
   boardWrap: { alignItems: 'center' },
-  playerBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
+  playerBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, minHeight: 22 },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: ui.border },
   dotActive: { backgroundColor: ui.accent },
-  playerName: { fontSize: 15, fontWeight: '600', color: ui.text },
+  playerName: { fontSize: 15, fontWeight: '600', color: ui.text, flexShrink: 1 },
   subtle: { color: ui.subtle },
   status: { fontSize: 16, textAlign: 'center', color: ui.text, paddingVertical: 4 },
   alert: { color: '#b3261e', fontWeight: '600' },

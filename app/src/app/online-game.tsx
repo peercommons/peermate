@@ -17,7 +17,8 @@ import {
   type PieceSymbol,
   type Square,
 } from '@peermate/core';
-import { Board } from '../components/Board';
+import { Board, type BoardPiece } from '../components/Board';
+import { Captured } from '../components/Captured';
 import { PromotionPicker } from '../components/PromotionPicker';
 import { formatMoves } from '../game/format';
 import { online, QUICK_TEXT, RELAYED_BULLET_WARNING, useOnline, type Connection } from '../net/online';
@@ -186,12 +187,15 @@ export default function OnlineGameScreen() {
   const silent = running ? session.silenceMs() : 0;
   const away = silent >= AWAY_AFTER_MS;
 
+  const position: BoardPiece[][] = session.chess.board().map((r) => r.map((p) => (p ? { type: p.type, color: p.color } : null)));
   return (
     <ScreenView style={styles.root}>
       <Stack.Screen options={{ title: `${state.tc} vs ${state.opponent.nick}` }} />
 
       <PlayerBar
         name={names[top]}
+        side={top}
+        position={position}
         sub={
           top === them
             ? `${state.opponent.rating ? `${state.opponent.rating}${VERIFIED[state.opponent.verified ?? 'none']} · ` : ''}${state.opponent.fingerprint}`
@@ -204,7 +208,7 @@ export default function OnlineGameScreen() {
       />
       <View style={styles.boardWrap}>
         <Board
-          position={session.chess.board().map((r) => r.map((p) => (p ? { type: p.type, color: p.color } : null)))}
+          position={position}
           size={boardSize}
           orientation={orientation}
           selected={selected}
@@ -222,6 +226,8 @@ export default function OnlineGameScreen() {
       </View>
       <PlayerBar
         name={names[orientation]}
+        side={orientation}
+        position={position}
         clock={formatClock(clocks[orientation])}
         active={running && session.chess.turn() === orientation}
         low={clocks[orientation] < 20_000}
@@ -355,14 +361,19 @@ function PlayerBar(p: {
   active: boolean;
   low: boolean;
   badge?: Connection;
+  side: Color;
+  position: BoardPiece[][];
 }) {
   return (
     <View style={styles.playerBar}>
       <View style={{ flex: 1 }}>
-        <Text style={styles.playerName} numberOfLines={1}>
-          {p.badge && <Text style={{ color: BADGE_COLOR[p.badge] }}>● </Text>}
-          {p.name}
-        </Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.playerName} numberOfLines={1}>
+            {p.badge && <Text style={{ color: BADGE_COLOR[p.badge] }}>● </Text>}
+            {p.name}
+          </Text>
+          <Captured position={p.position} side={p.side} />
+        </View>
         {p.sub && <Text style={styles.sub}>{p.sub}</Text>}
       </View>
       <Text
@@ -392,7 +403,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
   boardWrap: { alignItems: 'center' },
   playerBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
-  playerName: { fontSize: 15, fontWeight: '600', color: ui.text },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 22 },
+  playerName: { fontSize: 15, fontWeight: '600', color: ui.text, flexShrink: 1 },
   sub: { fontSize: 11, color: ui.subtle },
   clock: {
     fontSize: 20,
