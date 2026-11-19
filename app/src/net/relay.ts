@@ -90,7 +90,8 @@ const PROBE_MS = 20_000;
 const SEEK_MAX_AGE_S = 45;
 const MAX_SEEN = 2000;
 
-export type Seek = { room: string; peer: string; npub: string; tc: string; nick: string };
+/** `at`: when the seek was sent (ms, the sender's clock). */
+export type Seek = { room: string; peer: string; npub: string; tc: string; nick: string; at: number };
 
 export type RelayOptions = {
   nostrSecret: Uint8Array;
@@ -530,7 +531,7 @@ export class RelayNet {
         if (typeof c.tc !== 'string' || typeof c.nick !== 'string') return;
         const tag = e.tags.find((t) => t[0] === 't')?.[1] ?? '';
         const room = tag.startsWith('peermate-v1-') ? tag.slice('peermate-v1-'.length) : tag;
-        this.opts.onSeek?.({ room, peer: c.pk, npub: e.pubkey, tc: c.tc, nick: c.nick.slice(0, 32) });
+        this.opts.onSeek?.({ room, peer: c.pk, npub: e.pubkey, tc: c.tc, nick: c.nick.slice(0, 32), at: e.created_at * 1000 });
       },
     );
     announce();

@@ -98,8 +98,8 @@ export default function OnlineLobby() {
               {state.phase === 'seeking' && !state.friend && (
                 <Text style={styles.subtle}>
                   {state.lobbyPeers === 0
-                    ? 'Waiting for another player to connect'
-                    : `Connected to ${state.lobbyPeers} player${state.lobbyPeers === 1 ? '' : 's'}`}
+                    ? `Waiting for another player to look for ${state.tc}`
+                    : `${state.lobbyPeers} other player${state.lobbyPeers === 1 ? '' : 's'} looking for ${state.tc}`}
                 </Text>
               )}
               <Secondary label="Cancel" onPress={() => online.cancelSeek()} />

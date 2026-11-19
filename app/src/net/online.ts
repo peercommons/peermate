@@ -99,6 +99,12 @@ const PRESENCE_OFFLINE_EVERY_MS = 300_000;
 export const PRESENCE_FRESH_MS = 150_000; // a single lost note never shows a friend offline
 /** When a friend's note arrives and we haven't told them for this long, answer at once. */
 const PRESENCE_ANSWER_AFTER_MS = 30_000;
+/**
+ * A player counts as still looking while their latest seek is younger than this
+ * (seeks repeat every 20 s). The relays also hand out seeks up to 45 s old, from
+ * players who may have been paired since: those don't count.
+ */
+const SEEKER_FRESH_MS = 30_000;
 
 /** How long a friend has to answer a challenge. */
 export const INVITE_TIMEOUT_MS = 120_000;
@@ -203,7 +209,14 @@ class OnlineController {
   private unsubscribe: (() => void) | null = null;
   private matchmaker: Matchmaker | null = null;
   private match: Match | null = null;
-  private lobbyPeers = new Set<string>();
+  /**
+   * Players seeking our time control, by when their latest relay seek was sent.
+   * Seeks repeat every 20 s and stop once a player is paired, so only fresh ones
+   * count: the lobby also holds other time controls of the class and players
+   * already in a game, who can't pair with us.
+   */
+  private seekers = new Map<string, number>();
+  private seekersTimer: ReturnType<typeof setInterval> | null = null;
   private relay: RelayNet | null = null;
   private router: PeerRouter | null = null;
   private startedAt = 0;
@@ -282,7 +295,7 @@ class OnlineController {
       // itself on the DHT (longer on mobile data), and the relays alone can pair.
       const me = await loadMe();
       if ((this.state as OnlineState).phase !== 'starting') return; // cancelled meanwhile
-      this.lobbyPeers.clear();
+      this.seekers.clear();
       const { relay, router } = this.openTransports(me, null);
       this.relayPeers = new Map();
       const mm = (this.matchmaker = new Matchmaker({
@@ -304,6 +317,8 @@ class OnlineController {
         () => this.matchmaker === mm && this.state.phase === 'seeking',
       );
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0 });
+      if (this.seekersTimer) clearInterval(this.seekersTimer);
+      this.seekersTimer = setInterval(() => this.countSeekers(), 5_000);
     } catch (err) {
       this.set({ phase: 'error', message: `Couldn't start: ${(err as Error).message}` });
     }
@@ -904,7 +919,7 @@ class OnlineController {
     try {
       const me = await loadMe(); // relays now; the P2P worker when it's ready
       if ((this.state as OnlineState).phase !== 'starting') return;
-      this.lobbyPeers.clear();
+      this.seekers.clear();
       const { router } = this.openTransports(me, null);
       router.relayKnown(key, npub);
       this.matchmaker = new Matchmaker({
@@ -1004,10 +1019,17 @@ class OnlineController {
     }
   }
 
-  private noteLobbyPeer(peer: string) {
-    if (this.state.phase !== 'seeking' || this.lobbyPeers.has(peer)) return;
-    this.lobbyPeers.add(peer);
-    this.set({ ...this.state, lobbyPeers: this.lobbyPeers.size });
+  /** Updates the shown count of players looking for our time control. */
+  private countSeekers() {
+    if (this.state.phase !== 'seeking') {
+      if (this.seekersTimer) clearInterval(this.seekersTimer);
+      this.seekersTimer = null;
+      return;
+    }
+    const now = Date.now();
+    let n = 0;
+    for (const at of this.seekers.values()) if (now - at < SEEKER_FRESH_MS) n++;
+    if (n !== this.state.lobbyPeers) this.set({ ...this.state, lobbyPeers: n });
   }
 
   /** Another player's seek on the relays. */
@@ -1017,7 +1039,9 @@ class OnlineController {
     // Seeks are unsigned: never let one overwrite a route we already have.
     if (!this.router.npubOf(seek.peer)) this.router.relayKnown(seek.peer, seek.npub);
     this.worker?.send({ type: 'connect', peer: seek.peer }); // try for a direct link too
-    this.noteLobbyPeer(seek.peer);
+    const at = Math.min(seek.at, Date.now()); // a sender's clock may run ahead
+    this.seekers.set(seek.peer, Math.max(this.seekers.get(seek.peer) ?? 0, at));
+    this.countSeekers();
     this.relayPeerSeen(seek.peer); // seeks repeat every 20 s
   }
 
@@ -1046,7 +1070,6 @@ class OnlineController {
     this.router.relayKnown(peer, npub);
     if (!this.isOpponent(peer)) {
       if (this.state.phase !== 'seeking') return this.checkInvite(peer, wire);
-      this.noteLobbyPeer(peer);
       this.relayPeerSeen(peer);
     }
     this.deliver(peer, wire);
@@ -1061,7 +1084,6 @@ class OnlineController {
           this.directSince = Date.now();
           this.routeChanged();
         } else if (this.state.phase === 'seeking') {
-          this.noteLobbyPeer(e.id);
           mm?.peerConnected(e.id);
         }
         return;
@@ -1079,9 +1101,7 @@ class OnlineController {
         } else if (this.router?.route(e.id) == null) {
           // Gone for good only if the relays can't reach them either; a lost
           // direct link mid-pairing mustn't throw the handshake away.
-          this.lobbyPeers.delete(e.id);
           mm?.peerLeft(e.id);
-          if (this.state.phase === 'seeking') this.set({ ...this.state, lobbyPeers: this.lobbyPeers.size });
         }
         return;
     }

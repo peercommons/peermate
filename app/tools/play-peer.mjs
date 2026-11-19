@@ -20,6 +20,7 @@ import {
   deriveIdentity,
   fingerprint,
   GameSession,
+  HELLO_TIMEOUT_MS,
   lobbyRoom,
   Matchmaker,
   newSeed,
@@ -53,6 +54,17 @@ let mm = null
 let host = null
 let directSince = 0
 
+// A relay peer is told to the matchmaker once per HELLO_TIMEOUT_MS, like the app
+// (online.ts relayPeerSeen): peerConnected() on a known peer resyncs, and doing it
+// on every relay message set off a resync storm (each handshake message 5-7 times).
+const relayPeers = new Map()
+function relayPeerSeen(peer) {
+  const told = relayPeers.get(peer)
+  if (!mm || (told !== undefined && Date.now() - told < HELLO_TIMEOUT_MS)) return
+  relayPeers.set(peer, Date.now())
+  mm.peerConnected(peer)
+}
+
 const relay = new RelayNet({
   nostrSecret: identity.nostr.secretKey,
   peerKey: identity.peer.publicKey,
@@ -62,13 +74,13 @@ const relay = new RelayNet({
     if (!router.npubOf(seek.peer)) router.relayKnown(seek.peer, seek.npub)
     log(`relay seek from ${seek.nick} (${fingerprint(seek.peer)})`)
     host?.send({ type: 'connect', peer: seek.peer })
-    mm?.peerConnected(seek.peer)
+    relayPeerSeen(seek.peer)
   },
   onMessage: (npub, wire) => {
     const peer = wireSender(wire)
     if (!peer || !decode(wire)) return
     router.relayKnown(peer, npub)
-    if (match?.opponent.key !== peer) mm?.peerConnected(peer)
+    if (match?.opponent.key !== peer) relayPeerSeen(peer)
     mm?.peerData(peer, wire)
   }
 })
@@ -193,7 +205,8 @@ function onEvent(e) {
           JSON.stringify({ end: e.end, ply: session.ply, fen: session.chess.fen(), color: session.myColor, routeSwitches })
       )
       session.chat({ quick: 'gg' })
-      setTimeout(() => shutdown(0), 3000)
+      // shutdown() waits for the acknowledgements, so the next seek can start soon.
+      setTimeout(() => shutdown(0), 500)
       break
   }
 }

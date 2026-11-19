@@ -15,7 +15,7 @@ case "${1:-status}" in
     mkdir -p "$DIR"
     [[ -f "$DIR/pids" ]] && { echo "Already running (tools/review-bots.sh stop first)."; exit 1; }
     for tc in "${TCS[@]}"; do
-      nohup bash -c "while true; do node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/play-peer.mjs '$tc' --nick 'Test opponent' --think 1500; sleep 2; done" \
+      nohup bash -c "while true; do node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/play-peer.mjs '$tc' --nick 'Test opponent' --think 1500; sleep 1; done" \
         >> "$DIR/$tc.log" 2>&1 &
       echo $! >> "$DIR/pids"
     done
