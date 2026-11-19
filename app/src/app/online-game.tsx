@@ -5,6 +5,7 @@ import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowD
 import { Stack, router } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
 import { announceMove } from '../game/speech';
+import { moveSound, playSound } from '../game/sound';
 import * as Haptics from 'expo-haptics';
 import {
   AWAY_AFTER_MS,
@@ -72,6 +73,10 @@ export default function OnlineGameScreen() {
     }
     // Screen readers hear the opponent's moves.
     const s = online.session;
+    if (ply > prevPly.current && s && settings.sound) {
+      const san = s.chess.history().at(-1);
+      if (san) playSound(moveSound(san));
+    }
     if (ply > prevPly.current && s) {
       const mover = ply % 2 === 1 ? 'w' : 'b';
       const san = s.chess.history().at(-1);
@@ -79,7 +84,28 @@ export default function OnlineGameScreen() {
     }
     prevPly.current = ply;
     setSelected(null);
-  }, [ply, settings.haptics]);
+  }, [ply, settings.haptics, settings.sound]);
+
+  // Sounds for the start and end of the game, and once when my clock drops under 10 s.
+  const ended = state.phase === 'game' && !!state.end;
+  const wasEnded = useRef<boolean | null>(null); // null: just opened
+  useEffect(() => {
+    if (settings.sound) {
+      if (ended && wasEnded.current === false) playSound('end');
+      else if (!ended && wasEnded.current === null && ply === 0) playSound('start'); // a new game, not a return to one
+    }
+    wasEnded.current = ended;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ended]);
+  const myClock = session && running ? session.clocks()[session.myColor] : Infinity;
+  const lowWarned = useRef(false);
+  useEffect(() => {
+    if (myClock > 10_000) lowWarned.current = false;
+    else if (!lowWarned.current && session?.myTurn) {
+      lowWarned.current = true;
+      if (settings.sound) playSound('lowtime');
+    }
+  });
 
   // After the first co-signed game: ask once whether to publish games (SPECS §7.5).
   const askPublish = state.phase === 'game' && state.askPublish;

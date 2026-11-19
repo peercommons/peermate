@@ -14,6 +14,7 @@ const TOGGLES: { key: keyof Settings; label: string; hint: string }[] = [
   { key: 'showLegalMoves', label: 'Show legal moves', hint: 'Dots on the squares the selected piece can move to' },
   { key: 'showCoordinates', label: 'Show coordinates', hint: 'Files and ranks along the board edge' },
   { key: 'autoFlip', label: 'Auto-flip in pass & play', hint: 'Turn the board to the player whose move it is' },
+  { key: 'sound', label: 'Sounds', hint: 'Moves, captures, checks and the end of a game (silent when the phone is)' },
   { key: 'haptics', label: 'Vibrate on moves', hint: 'A light tap per move, a firmer one for captures and checks' },
 ];
 

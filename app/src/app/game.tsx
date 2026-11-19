@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Tex
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
 import { announceMove } from '../game/speech';
+import { moveSound, playSound } from '../game/sound';
 import * as Haptics from 'expo-haptics';
 import { describeOutcome, getLevel, type Color } from '@peermate/core';
 import { Board, type BoardPiece } from '../components/Board';
@@ -71,6 +72,7 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
       const mover: Color = moveCount % 2 === 1 ? 'w' : 'b';
       if (mode.kind !== 'cpu' || mover !== mode.player) announceMove(mover, lastSan);
     }
+    if (settings.sound && moveCount > prevCount.current && lastSan) playSound(moveSound(lastSan));
     if (settings.haptics && moveCount > prevCount.current && lastSan) {
       const strong = /[x+#]/.test(lastSan);
       Haptics.impactAsync(strong ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light).catch(
@@ -78,7 +80,15 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
       );
     }
     prevCount.current = moveCount;
-  }, [moveCount, lastSan, settings.haptics, mode]);
+  }, [moveCount, lastSan, settings.haptics, settings.sound, mode]);
+
+  // A chime when the game ends (mate, draw, resignation), not when a finished game is opened.
+  const ended = !!game.result;
+  const wasEnded = useRef(ended);
+  useEffect(() => {
+    if (ended && !wasEnded.current && settings.sound) playSound('end');
+    wasEnded.current = ended;
+  }, [ended, settings.sound]);
 
   const title = useMemo(
     () => (mode.kind === 'cpu' ? `vs CPU · Level ${mode.level} (${getLevel(mode.level).label})` : 'Pass & play'),
