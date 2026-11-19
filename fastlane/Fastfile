@@ -410,6 +410,18 @@ platform :ios do
   private_lane :deliver_listing do |options|
     dir = File.join(META_DIR, 'ios')
     ensure_no_placeholders!(dir)
+    # Contact details for Apple's reviewers only (never shown on the store). They
+    # live in fastlane/.env, not in this public repo; the notes are in
+    # metadata/ios/review_information/notes.txt. Apple only creates this section
+    # once something is written to it, and deliver fails ("No data") without it.
+    require_env!('PEERMATE_REVIEW_FIRST_NAME', 'PEERMATE_REVIEW_LAST_NAME', 'PEERMATE_REVIEW_PHONE')
+    review = {
+      first_name: ENV['PEERMATE_REVIEW_FIRST_NAME'],
+      last_name: ENV['PEERMATE_REVIEW_LAST_NAME'],
+      phone_number: ENV['PEERMATE_REVIEW_PHONE'],
+      email_address: ENV['PEERMATE_REVIEW_EMAIL'].to_s.empty? ? 'support@peercommons.org' : ENV['PEERMATE_REVIEW_EMAIL'],
+      notes: File.read(File.join(dir, 'review_information/notes.txt')).strip
+    }
     deliver(
       api_key: asc_api_key,
       app_identifier: BUNDLE_ID,
@@ -420,6 +432,7 @@ platform :ios do
       skip_binary_upload: true,
       skip_app_version_update: false,
       force: true, # no HTML preview prompt
+      app_review_information: review,
       run_precheck_before_submit: options[:submit],
       precheck_include_in_app_purchases: false,
       submit_for_review: options[:submit],
