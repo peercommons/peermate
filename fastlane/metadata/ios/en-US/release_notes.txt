@@ -1,7 +1,14 @@
-Quick Match
-• The waiting screen now counts only players looking for the same time control.
-• Pairing is faster and more reliable.
+Easier to find your way
+• The back arrow on Online, Friends, Games and Settings now always returns to Home.
+• A tidier Home screen: play the computer first, pass & play as a link below.
 
-Friends and messages
-• Messages to friends arrive more reliably: relays that accept messages but never deliver them are now skipped.
-• Online status uses less data and battery.
+Playing
+• Captured pieces and the material lead are shown next to each player.
+• The move list keeps the latest move in view.
+• Resigning against the computer or in pass & play asks first.
+• Home remembers the computer level and colour you last chose.
+
+Your games
+• Filter by computer, online or pass & play.
+• Each game shows Won, Lost or Draw and what kind of game it was.
+• Press and hold a game to delete it.
