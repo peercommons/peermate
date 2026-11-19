@@ -26,7 +26,7 @@ relayHealth.onChange(() => {
 
 // The private-message delivery check's result (relay.ts DMDelivery), so a relay
 // that swallows messages stays excluded across launches until it's rechecked.
-const DM_KEY = 'relayDM.v1';
+const DM_KEY = 'relayDM.v2'; // v1 could hold a run that reached no relay
 try {
   dmDelivery.load(JSON.parse(Storage.getItemSync(DM_KEY) ?? 'null'));
 } catch {

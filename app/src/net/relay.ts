@@ -170,7 +170,9 @@ class DMDelivery {
       if (ok === true) this.bad.delete(url);
       else if (ok === false) this.bad.add(url);
     }
-    this.checkedAt = now;
+    // Only a run that reached some relay counts: one made while offline (every
+    // relay unreachable) must not put off the next check for DM_CHECK_EVERY_MS.
+    if (results.some(([, ok]) => ok !== null)) this.checkedAt = now;
     for (const l of [...this.listeners]) l(); // saved; RelayNets reopen if the bad set changed
   }
 

@@ -28,3 +28,11 @@ test('due every DM_CHECK_EVERY_MS; saved state round-trips; unknown relays are d
   dmDelivery.load(null) // malformed: ignored
   assert.deepEqual(dmDelivery.snapshot(), { bad: [b], at: 42 })
 })
+
+test('a run that reached no relay does not count as a check', () => {
+  dmDelivery.load({ bad: [], at: 0 })
+  dmDelivery.update([[a, null], [b, null]], 50_000)
+  assert.equal(dmDelivery.due(50_001), true)
+  dmDelivery.update([[a, null], [b, true]], 60_000)
+  assert.equal(dmDelivery.due(60_001), false)
+})
