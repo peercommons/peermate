@@ -209,13 +209,16 @@ export async function checkDMDelivery(
   const me = getPublicKey(nostrSecret);
   const pool = new SimplePool();
   pool.automaticallyAuth = () => async (event) => finalizeEvent(event, nostrSecret);
+  const reasons: string[] = [];
   try {
     const results = await Promise.all(
       relays.map(async (url): Promise<[string, boolean | null]> => {
         const wrap = selfWrap(nostrSecret, me);
         try {
           await Promise.any(pool.publish([url], wrap, { onauth: (e) => Promise.resolve(finalizeEvent(e, nostrSecret)) }));
-        } catch {
+        } catch (err) {
+          const reason = String((err as { errors?: unknown[] }).errors?.[0] ?? err); // Promise.any: the relay's error
+          reasons.push(`${host(url)}: ${reason.slice(0, 80)}`);
           return [url, null]; // unreachable or refused: relayHealth's business
         }
         await new Promise((r) => setTimeout(r, 2_000));
@@ -226,6 +229,7 @@ export async function checkDMDelivery(
     dmDelivery.update(results);
     const fmt = (ok: boolean | null) => results.filter(([, r]) => r === ok).map(([u]) => host(u)).join(', ') || '-';
     onLog?.(`private-message check: delivered ${fmt(true)}; not delivered ${fmt(false)}; unreachable ${fmt(null)}`);
+    if (reasons.length) onLog?.(`private-message check refusals: ${reasons.join(' | ')}`);
   } finally {
     pool.destroy();
   }
