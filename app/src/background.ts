@@ -13,6 +13,7 @@ import { addMessage, isUnread, MESSAGE_MAX, syncedTo } from './net/messages';
 import { addIncoming, parseChallenge } from './net/challenges';
 import { notifyChallenge, notifyMessage } from './net/notify';
 import { loadMe } from './net/profile';
+import './net/relayHealthStore'; // saved relay health, before any relay connection
 import { fetchDMsOnce } from './net/relay';
 
 export const MESSAGES_TASK = 'peermate-messages';

@@ -12,3 +12,4 @@ export * from './net/matchmaker.ts';
 export * from './net/router.ts';
 export * from './net/report.ts';
 export * from './rating.ts';
+export * from './net/relayHealth.ts';

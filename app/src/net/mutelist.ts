@@ -21,7 +21,7 @@ import {
   type BlockedPlayer,
 } from './blocklist';
 import { loadMe } from './profile';
-import { DEFAULT_RELAYS } from './relay';
+import { publishTracked, relayHealth } from './relay';
 
 export const MUTE_LIST_KIND = 10000;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -96,7 +96,8 @@ async function syncOnce(log: (...a: unknown[]) => void) {
   const key = nip44.getConversationKey(sk, pk);
   const pool = new SimplePool();
   try {
-    const events = await pool.querySync(DEFAULT_RELAYS, { kinds: [MUTE_LIST_KIND], authors: [pk] }, { maxWait: 8_000 });
+    const relays = relayHealth.active();
+    const events = await pool.querySync(relays, { kinds: [MUTE_LIST_KIND], authors: [pk] }, { maxWait: 8_000 });
     const latest = events.reduce<(typeof events)[number] | null>((a, e) => (!a || e.created_at > a.created_at ? e : a), null);
     const local = blocklistMeta();
     const remoteAt = latest ? latest.created_at * 1000 : 0;
@@ -130,10 +131,7 @@ async function syncOnce(log: (...a: unknown[]) => void) {
       },
       sk,
     );
-    const ok = await Promise.any(pool.publish(DEFAULT_RELAYS, event)).then(
-      () => true,
-      () => false,
-    );
+    const ok = await publishTracked(pool, relays, event);
     if (ok) {
       markPublished(changedAt, event.created_at * 1000);
       log('mute list: published', list.length);

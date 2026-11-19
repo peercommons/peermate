@@ -52,6 +52,7 @@ import {
   parseChallenge,
 } from './challenges';
 import { addFriend, friendByNpub, friends, getFriend, isFriend, refreshFriend, removeFriend } from './friends';
+import './relayHealthStore'; // saved relay health, before any relay connection
 import { startMuteListSync } from './mutelist';
 import { loadMe, type Me } from './profile';
 import { RelayNet, rumorId, type PresenceStatus, type Seek } from './relay';

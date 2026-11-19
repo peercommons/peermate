@@ -2,7 +2,8 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { appLog } from '../../modules/peermate-log';
-import { DEFAULT_RELAYS } from '../net/relay';
+import { DEFAULT_RELAYS, relayHealth } from '../net/relay';
+import '../net/relayHealthStore';
 import { CANDIDATE_RELAYS, checkRelays, type RelayResult } from '../net/relaycheck';
 import { ui } from '../theme';
 
@@ -47,7 +48,8 @@ export default function RelayCheckScreen() {
     <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.root}>
       <Text style={styles.subtle}>
         Connects to each relay, publishes a test message from a new throwaway key, and times how long it takes to
-        come back. Run it on Wi‑Fi and on mobile data. Relays marked "in use" are the ones the app uses now.
+        come back. Run it on Wi‑Fi and on mobile data. Relays marked "in use" are the ones the app uses now; the app
+        rests a relay that keeps failing and tries it again later.
       </Text>
       <Pressable
         disabled={running}
@@ -63,7 +65,15 @@ export default function RelayCheckScreen() {
           <View key={u} style={styles.card}>
             <Text style={styles.name}>
               {host(u)}
-              {DEFAULT_RELAYS.includes(u) ? <Text style={styles.inUse}>  in use</Text> : null}
+              {DEFAULT_RELAYS.includes(u) ? (
+                relayHealth.resting(u) ? (
+                  <Text style={styles.resting}>
+                    {'  '}resting until {new Date(relayHealth.restingUntil(u)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                ) : (
+                  <Text style={styles.inUse}>  in use</Text>
+                )
+              ) : null}
             </Text>
             {r ? (
               <Text style={{ color: COLOR[r.verdict] }}>
@@ -103,4 +113,5 @@ const styles = StyleSheet.create({
   },
   name: { fontWeight: '700', color: ui.text },
   inUse: { color: ui.accent, fontSize: 12, fontWeight: '600' },
+  resting: { color: '#e07b24', fontSize: 12, fontWeight: '600' },
 });

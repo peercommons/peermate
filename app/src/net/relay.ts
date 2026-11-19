@@ -15,6 +15,7 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import * as nip44 from 'nostr-tools/nip44';
 import * as nip17 from 'nostr-tools/nip17';
 import * as nip59 from 'nostr-tools/nip59';
+import { RelayHealth } from '@peermate/core';
 
 /** Provisional app-specific ephemeral kind (SPECS §16 Q2). */
 export const PEERMATE_KIND = 25050;
@@ -34,6 +35,36 @@ export const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
 ];
+
+/**
+ * Which default relays are working (auto-demotion, SPECS §6.4). Shared by every
+ * RelayNet and one-off fetch in this process; the app saves it between runs.
+ */
+export const relayHealth = new RelayHealth(DEFAULT_RELAYS);
+
+/**
+ * Publishes to `relays` and feeds the results to relayHealth. A relay's failure
+ * only counts if another relay took the same event: if none did, we're probably
+ * offline, which says nothing about the relays.
+ */
+export function publishTracked(
+  pool: SimplePool,
+  relays: string[],
+  event: Parameters<SimplePool['publish']>[1],
+): Promise<boolean> {
+  const tries = pool.publish(relays, event);
+  void Promise.allSettled(tries).then((results) => {
+    if (!results.some((r) => r.status === 'fulfilled')) return;
+    results.forEach((r, i) => relayHealth.record(relays[i], r.status === 'fulfilled'));
+  });
+  // Resolves at the first relay's OK: a dead relay's timeout doesn't hold it up.
+  return Promise.any(tries).then(
+    () => true,
+    () => false,
+  );
+}
+
+const host = (url: string) => url.replace(/^wss:\/\//, '');
 
 const SEEK_REPEAT_MS = 20_000;
 const RESUBSCRIBE_MIN_MS = 2_000;
@@ -85,7 +116,7 @@ export async function fetchDMsOnce(
   nostrSecret: Uint8Array,
   sinceS: number,
   maxWaitMs = 15_000,
-  relays = DEFAULT_RELAYS,
+  relays = relayHealth.active(),
 ): Promise<{ id: string; from: string; text: string; at: number }[]> {
   const me = getPublicKey(nostrSecret);
   const pool = new SimplePool();
@@ -114,7 +145,12 @@ export async function fetchDMsOnce(
 export class RelayNet {
   readonly npub: string;
   private readonly sk: Uint8Array;
-  private readonly relays: string[];
+  private relays: string[];
+  /** Following relayHealth (false when the caller fixed the relay list). */
+  private readonly tracked: boolean;
+  private stopHealth: (() => void) | null = null;
+  /** Reopen each live subscription on the current relays. */
+  private readonly reopeners = new Set<() => void>();
   private readonly pool: SimplePool;
   private readonly seen = new Set<string>();
   private readonly keys = new Map<string, Uint8Array>();
@@ -133,7 +169,10 @@ export class RelayNet {
     // (kind 1059) only to their authenticated recipient.
     this.pool = new SimplePool({ enablePing: true, enableReconnect: true });
     this.pool.automaticallyAuth = () => async (event) => finalizeEvent(event, this.sk);
-    this.relays = opts.relays ?? DEFAULT_RELAYS;
+    this.tracked = !opts.relays;
+    this.relays = opts.relays ?? relayHealth.active();
+    // Relays rested or brought back: move publishing and subscriptions over.
+    if (this.tracked) this.stopHealth = relayHealth.onChange(() => this.followHealth());
     this.inbox = this.resilient(
       'inbox',
       () => ({ kinds: [PEERMATE_KIND], '#p': [this.npub], since: Math.floor(Date.now() / 1000) - 10 }),
@@ -195,9 +234,20 @@ export class RelayNet {
       });
     };
     open();
+    const reopen = () => {
+      if (stopped || this.closed) return;
+      const old = sub;
+      sub = null;
+      generation++; // its close must not schedule another reopen
+      old?.close();
+      if (timer) clearTimeout(timer);
+      open();
+    };
+    this.reopeners.add(reopen);
     return {
       close: () => {
         stopped = true;
+        this.reopeners.delete(reopen);
         clearInterval(healthTimer);
         if (timer) clearTimeout(timer);
         sub?.close();
@@ -227,8 +277,9 @@ export class RelayNet {
       { kind: PEERMATE_KIND, created_at: Math.floor(Date.now() / 1000), tags, content },
       this.sk,
     );
-    Promise.allSettled(this.pool.publish(this.relays, event)).then((results) => {
-      if (!results.some((r) => r.status === 'fulfilled')) this.opts.onLog?.('relay publish failed everywhere');
+    const relays = this.relays;
+    void publishTracked(this.pool, relays, event).then((ok) => {
+      if (!ok) this.opts.onLog?.('relay publish failed everywhere');
     });
   }
 
@@ -262,10 +313,7 @@ export class RelayNet {
     const id = rumorId(this.sk, npub, text, createdAt);
     if (this.closed) return { id, ok: false };
     // Sent once any relay has it (a dead relay would otherwise hold this until its timeout).
-    const ok = await Promise.any(this.pool.publish(this.relays, wrap)).then(
-      () => true,
-      () => false,
-    );
+    const ok = await publishTracked(this.pool, this.relays, wrap);
     return { id, ok };
   }
 
@@ -348,7 +396,21 @@ export class RelayNet {
     this.seeking = null;
   }
 
+  /** Switches to the relays relayHealth now says to use, if they changed. */
+  private followHealth() {
+    if (this.closed) return;
+    const next = relayHealth.active();
+    if (next.length === this.relays.length && next.every((u, i) => u === this.relays[i])) return;
+    const dropped = this.relays.filter((u) => !next.includes(u));
+    const added = next.filter((u) => !this.relays.includes(u));
+    this.opts.onLog?.(`relays: resting ${dropped.map(host).join(', ') || '-'}; back ${added.map(host).join(', ') || '-'}`);
+    this.relays = next;
+    for (const reopen of this.reopeners) reopen();
+    if (dropped.length) this.pool.close(dropped);
+  }
+
   close(): void {
+    this.stopHealth?.();
     this.unseek();
     this.closed = true;
     if (this.probeTimer) clearInterval(this.probeTimer);
