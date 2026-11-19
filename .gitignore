@@ -24,3 +24,6 @@ native/build/
 
 # Soak test output (app/tools/soak.mjs)
 app/soak-results/
+
+# Local Claude Code settings (kept on this machine only)
+.claude/
