@@ -248,11 +248,13 @@ class OnlineController {
     this.leave();
     this.set({ phase: 'starting', tc });
     try {
-      const [me, worker] = await Promise.all([loadMe(), getWorker()]);
+      // The relays don't wait for the P2P worker: it can take 10-20 s to announce
+      // itself on the DHT (longer on mobile data), and the relays alone can pair.
+      const me = await loadMe();
       if ((this.state as OnlineState).phase !== 'starting') return; // cancelled meanwhile
       this.lobbyPeers.clear();
-      const { relay, router } = this.openTransports(me, worker);
-      this.matchmaker = new Matchmaker({
+      const { relay, router } = this.openTransports(me, null);
+      const mm = (this.matchmaker = new Matchmaker({
         identity: me.identity,
         nick: me.profile.nick,
         tc,
@@ -260,12 +262,15 @@ class OnlineController {
         network: router,
         onMatch: (m) => this.onMatch(m, tc),
         isBlocked,
-      });
+      }));
       // Our rating band's room and the class-wide one: similar players meet first,
       // and nobody waits for lack of them (SPECS §6.2).
       const rooms = roomsToJoin(timeControlClass(tc), myRating(timeControlClass(tc)).r);
-      worker.send({ type: 'seek', rooms });
       relay.seek(rooms, { tc, nick: me.profile.nick });
+      this.withWorker(
+        (w) => w.send({ type: 'seek', rooms }),
+        () => this.matchmaker === mm && this.state.phase === 'seeking',
+      );
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0 });
     } catch (err) {
       this.set({ phase: 'error', message: `Couldn't start: ${(err as Error).message}` });
@@ -342,6 +347,21 @@ class OnlineController {
     this.router = router;
     if (worker) this.attachWorker(worker);
     return { relay, router };
+  }
+
+  /**
+   * Runs `fn` with the P2P worker once it's ready (at once if it is), attaching
+   * it to the open transports, unless `stillWanted()` says we've moved on.
+   */
+  private withWorker(fn: (w: P2PWorker) => void, stillWanted: () => boolean) {
+    getWorker().then(
+      (w) => {
+        if (!stillWanted() || !this.router) return;
+        if (this.worker !== w || !this.unsubscribe) this.attachWorker(w);
+        fn(w);
+      },
+      (err) => log('P2P worker unavailable (relays only):', String(err)),
+    );
   }
 
   private attachWorker(worker: P2PWorker) {
@@ -555,10 +575,14 @@ class OnlineController {
    */
   async listen(): Promise<void> {
     this.listening = true;
-    if (this.relay && this.worker) return this.announce(); // e.g. a friend was just added
+    if (this.relay && this.dms) return this.announce(); // e.g. a friend was just added
     try {
-      const [me, worker] = await Promise.all([loadMe(), getWorker()]);
-      const { relay } = this.openTransports(me, worker);
+      const me = await loadMe();
+      const { relay } = this.openTransports(me, null); // the worker joins when it's ready
+      this.withWorker(
+        () => undefined,
+        () => this.listening,
+      );
       log('listening for friends');
       if (!this.muteSyncStarted) {
         this.muteSyncStarted = true;
@@ -787,10 +811,10 @@ class OnlineController {
     this.leave();
     this.set({ phase: 'starting', tc, friend: nick });
     try {
-      const [me, worker] = await Promise.all([loadMe(), getWorker()]);
+      const me = await loadMe(); // relays now; the P2P worker when it's ready
       if ((this.state as OnlineState).phase !== 'starting') return;
       this.lobbyPeers.clear();
-      const { router } = this.openTransports(me, worker);
+      const { router } = this.openTransports(me, null);
       router.relayKnown(key, npub);
       this.matchmaker = new Matchmaker({
         identity: me.identity,
@@ -805,7 +829,11 @@ class OnlineController {
         onDeclined: (reason) => this.challengeOver(reason === 'busy' ? `${nick} is busy` : `${nick} declined`),
       });
       this.matchmakerPeer = key;
-      worker.send({ type: 'connect', peer: key }); // direct if we can; the relays otherwise
+      // Direct if we can (once the worker is up); the relays meanwhile.
+      this.withWorker(
+        (w) => w.send({ type: 'connect', peer: key }),
+        () => this.matchmakerPeer === key && this.state.phase === 'seeking',
+      );
       this.matchmaker.peerConnected(key);
       this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0, friend: nick });
       if (this.challengeTimer) clearTimeout(this.challengeTimer);
