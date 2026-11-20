@@ -1,10 +1,11 @@
-// Online lobby: pick a time control and find an opponent (SPECS §2.1 Quick Match).
+// Online lobby: pick a time control and find an opponent (SPECS §2.1 Quick Match),
+// or pick someone who's already looking (Open Seeks).
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, router, useFocusEffect } from 'expo-router';
 import { formatRating, NEW_RATING, TIME_CONTROL_CLASSES, timeControlClass } from '@peermate/core';
 import { useRatings } from '../net/ratings';
-import { online, TIME_CONTROLS, useOnline } from '../net/online';
+import { online, TIME_CONTROLS, useOnline, useOpenSeeks } from '../net/online';
 import { loadMe, type Me } from '../net/profile';
 import { ui } from '../theme';
 
@@ -20,6 +21,9 @@ export default function OnlineLobby() {
       loadMe().then(setMe).catch(() => undefined);
     }, []),
   );
+  // The open seeks list is live only while this screen is on show.
+  useFocusEffect(useCallback(() => online.browse(), []));
+  const openSeeks = useOpenSeeks();
 
   // Matched: _layout opens the game (from any screen).
 
@@ -88,11 +92,13 @@ export default function OnlineLobby() {
               <Text style={styles.status}>
                 {state.phase === 'starting'
                   ? 'Connecting to the network…'
-                  : state.friend
+                  : state.friend && state.joining
+                    ? `Starting a ${state.tc} game with ${state.friend} · ${Math.floor((now - state.since) / 1000)} s`
+                    : state.friend
                     ? `Waiting for ${state.friend} to accept ${state.tc} · ${Math.floor((now - state.since) / 1000)} s`
                     : `Looking for a ${state.tc} opponent · ${Math.floor((now - state.since) / 1000)} s`}
               </Text>
-              {state.phase === 'seeking' && state.friend && (
+              {state.phase === 'seeking' && state.friend && !state.joining && (
                 <Text style={styles.subtle}>They get your challenge if Peermate is open on their phone.</Text>
               )}
               {state.phase === 'seeking' && !state.friend && (
@@ -109,6 +115,43 @@ export default function OnlineLobby() {
           )}
 
           {state.phase === 'error' && <Text style={styles.error}>{state.message}</Text>}
+        </View>
+      )}
+
+      {!activeGame && !(state.phase === 'seeking' && state.friend) && (
+        <View style={styles.card}>
+          <Text style={styles.heading}>Open seeks</Text>
+          {openSeeks.length === 0 ? (
+            <Text style={styles.subtle}>
+              Nobody is looking for a game right now. Players who tap Find opponent show up here, and so will you.
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.subtle}>Players looking for a game now. Tap one to play them at their time control.</Text>
+              {openSeeks.map((s) => (
+                <Pressable
+                  key={s.peer}
+                  onPress={() => void online.join(s)}
+                  style={({ pressed }) => [styles.seekRow, pressed && { opacity: 0.6 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Play ${s.nick}${s.rating ? `, rated ${s.rating}` : ''}, ${s.tc}`}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.seekNick} numberOfLines={1}>
+                      {s.nick}
+                    </Text>
+                    <Text style={styles.subtle}>
+                      {s.rating ? `${s.rating} · ` : ''}
+                      {timeControlClass(s.tc)}
+                    </Text>
+                  </View>
+                  <View style={styles.seekTc}>
+                    <Text style={styles.chipTextSelected}>Play {s.tc}</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </>
+          )}
         </View>
       )}
 
@@ -164,5 +207,15 @@ const styles = StyleSheet.create({
   secondary: { borderRadius: 8, paddingVertical: 12, paddingHorizontal: 32, borderWidth: 1, borderColor: ui.border },
   secondaryText: { color: ui.text, fontWeight: '700' },
   error: { color: '#b3261e' },
+  seekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: ui.border,
+  },
+  seekNick: { fontSize: 16, fontWeight: '700', color: ui.text },
+  seekTc: { backgroundColor: ui.accent, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },
   note: { color: ui.subtle, fontSize: 12, paddingHorizontal: 4 },
 });

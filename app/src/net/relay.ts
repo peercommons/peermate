@@ -2,7 +2,8 @@
 // when a direct (hole-punched) connection can't be made.
 //
 // Everything is an ephemeral event (relays forward, don't store):
-//   seek:    tags [t, "peermate-v1-<room>"], content {v, pk, tc, nick}
+//   seek:    tags [t, "peermate-v1-<room>"], content {v, pk, tc, nick, r?, rd?}
+//            (r/rd: the seeker's self-reported rating, for the open seeks list)
 //            pk = Ed25519 peer key; the event's own pubkey is our Nostr key.
 //   message: tags [p, <recipient npub>], content = NIP-44(protocol wire message,
 //            or "P:<online|playing|away>" for presence, sent to friends only)
@@ -91,7 +92,7 @@ const SEEK_MAX_AGE_S = 45;
 const MAX_SEEN = 2000;
 
 /** `at`: when the seek was sent (ms, the sender's clock). */
-export type Seek = { room: string; peer: string; npub: string; tc: string; nick: string; at: number };
+export type Seek = { room: string; peer: string; npub: string; tc: string; nick: string; at: number; rating?: number; rd?: number };
 
 export type RelayOptions = {
   nostrSecret: Uint8Array;
@@ -501,7 +502,7 @@ export class RelayNet {
   }
 
   /** Announces a seek in `rooms` every 20 s and reports others' seeks. */
-  seek(rooms: string[], info: { tc: string; nick: string }): void {
+  seek(rooms: string[], info: { tc: string; nick: string; rating?: number; rd?: number }): void {
     this.unseek();
     const tags = rooms.map(roomTag);
     const announce = () => {
@@ -511,17 +512,28 @@ export class RelayNet {
             ['t', t],
             ['expiration', String(Math.floor(Date.now() / 1000) + SEEK_MAX_AGE_S)],
           ],
-          JSON.stringify({ v: 1, pk: this.opts.peerKey, tc: info.tc, nick: info.nick }),
+          JSON.stringify({ v: 1, pk: this.opts.peerKey, tc: info.tc, nick: info.nick, r: info.rating, rd: info.rd }),
         );
       }
     };
-    const sub = this.resilient(
-      'seek',
+    const sub = this.seekSubscription('seek', tags);
+    announce();
+    this.seeking = { sub, timer: setInterval(announce, SEEK_REPEAT_MS) };
+  }
+
+  /** Reports others' seeks in `rooms` without announcing one (the open seeks list). */
+  watchSeeks(rooms: string[]): { close(): void } {
+    return this.seekSubscription('seeks list', rooms.map(roomTag));
+  }
+
+  private seekSubscription(label: string, tags: string[]) {
+    return this.resilient(
+      label,
       () => ({ kinds: [PEERMATE_KIND], '#t': tags, since: Math.floor(Date.now() / 1000) - SEEK_MAX_AGE_S }),
       (e) => {
         if (e.pubkey === this.npub || !this.firstSighting(e.id)) return;
         if (Date.now() / 1000 - e.created_at > SEEK_MAX_AGE_S) return;
-        let c: { v?: number; pk?: unknown; tc?: unknown; nick?: unknown };
+        let c: { v?: number; pk?: unknown; tc?: unknown; nick?: unknown; r?: unknown; rd?: unknown };
         try {
           c = JSON.parse(e.content);
         } catch {
@@ -531,11 +543,18 @@ export class RelayNet {
         if (typeof c.tc !== 'string' || typeof c.nick !== 'string') return;
         const tag = e.tags.find((t) => t[0] === 't')?.[1] ?? '';
         const room = tag.startsWith('peermate-v1-') ? tag.slice('peermate-v1-'.length) : tag;
-        this.opts.onSeek?.({ room, peer: c.pk, npub: e.pubkey, tc: c.tc, nick: c.nick.slice(0, 32), at: e.created_at * 1000 });
+        const rated = Number.isSafeInteger(c.r) && Number.isSafeInteger(c.rd);
+        this.opts.onSeek?.({
+          room,
+          peer: c.pk,
+          npub: e.pubkey,
+          tc: c.tc,
+          nick: c.nick.slice(0, 32),
+          at: e.created_at * 1000,
+          ...(rated ? { rating: c.r as number, rd: c.rd as number } : {}),
+        });
       },
     );
-    announce();
-    this.seeking = { sub, timer: setInterval(announce, SEEK_REPEAT_MS) };
   }
 
   unseek(): void {

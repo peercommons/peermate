@@ -20,6 +20,7 @@ import {
   wireSender,
   GameSession,
   lobbyRoom,
+  TIME_CONTROL_CLASSES,
   Matchmaker,
   HELLO_TIMEOUT_MS,
   checkCosigned,
@@ -108,6 +109,11 @@ const PRESENCE_ANSWER_AFTER_MS = 30_000;
  */
 const SEEKER_FRESH_MS = 30_000;
 
+/** A player seeking a game, as shown in the open seeks list. */
+export type OpenSeek = { peer: string; npub: string; nick: string; tc: string; rating: string | null; at: number };
+/** Joining an open seek: how long the seeker has to pair with us before we give up. */
+const JOIN_TIMEOUT_MS = 30_000;
+
 /** How long a friend has to answer a challenge. */
 export const INVITE_TIMEOUT_MS = 120_000;
 
@@ -117,7 +123,15 @@ export type Connection = 'direct' | 'relayed' | 'reconnecting';
 export type OnlineState =
   | { phase: 'idle' }
   | { phase: 'starting'; tc: string; friend?: string }
-  | { phase: 'seeking'; tc: string; since: number; lobbyPeers: number; friend?: string }
+  | {
+      phase: 'seeking';
+      tc: string;
+      since: number;
+      lobbyPeers: number;
+      friend?: string;
+      /** Pairing with `friend` from the open seeks list (not a challenge they answer). */
+      joining?: boolean;
+    }
   | {
       phase: 'game';
       tc: string;
@@ -257,6 +271,10 @@ class OnlineController {
    * counts from 1 again, and an old ACK could cancel a new message.
    */
   private leftGid: string | null = null;
+  /** Players seeking now (the open seeks list), newest first. Replaced on change, for React. */
+  openSeeks: readonly OpenSeek[] = [];
+  private browsing: { sub: { close(): void }; timer: ReturnType<typeof setInterval> } | null = null;
+  private browsers = 0;
 
   constructor() {
     setInterval(() => this.checkLink(), LINK_CHECK_MS);
@@ -326,7 +344,7 @@ class OnlineController {
       // Our rating band's room and the class-wide one: similar players meet first,
       // and nobody waits for lack of them (SPECS §6.2).
       const rooms = roomsToJoin(timeControlClass(tc), myRating(timeControlClass(tc)).r);
-      relay.seek(rooms, { tc, nick: me.profile.nick });
+      relay.seek(rooms, { tc, nick: me.profile.nick, ...ratingFor(tc) });
       this.withWorker(
         (w) => w.send({ type: 'seek', rooms }),
         () => this.matchmaker === mm && this.state.phase === 'seeking',
@@ -416,6 +434,7 @@ class OnlineController {
     this.relay = relay;
     this.router = router;
     if (worker) this.attachWorker(worker);
+    if (this.browsers > 0) queueMicrotask(() => void this.startBrowsing()); // the list's subscription closed with the old relay
     return { relay, router };
   }
 
@@ -612,6 +631,7 @@ class OnlineController {
     }
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.stopBrowsing();
     this.relay?.close();
     this.relay = null;
     this.router = null;
@@ -938,6 +958,81 @@ class OnlineController {
     if (inv.kind !== 'offline') this.sendDecline(inv.key, 'declined');
   }
 
+  // ---- open seeks ------------------------------------------------------------
+
+  /**
+   * Shows who's seeking a game (every class's "any" room on the relays; each
+   * seeker announces there), until the returned function is called. Screens
+   * call it while they're on show.
+   */
+  browse(): () => void {
+    this.browsers++;
+    void this.startBrowsing();
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      this.browsers = Math.max(0, this.browsers - 1);
+      if (this.browsers === 0) this.stopBrowsing();
+    };
+  }
+
+  private async startBrowsing() {
+    if (this.browsing) return;
+    const me = await loadMe();
+    if (this.browsing || this.browsers === 0) return;
+    const { relay } = this.openTransports(me, null);
+    const sub = relay.watchSeeks(TIME_CONTROL_CLASSES.map((c) => lobbyRoom(c, 'any')));
+    const timer = setInterval(() => this.pruneOpenSeeks(), 5_000);
+    this.browsing = { sub, timer };
+    log('browsing open seeks');
+  }
+
+  private stopBrowsing() {
+    if (!this.browsing) return;
+    this.browsing.sub.close();
+    clearInterval(this.browsing.timer);
+    this.browsing = null;
+    this.setOpenSeeks([]);
+  }
+
+  private noteOpenSeek(seek: Seek) {
+    try {
+      parseTimeControl(seek.tc);
+    } catch {
+      return;
+    }
+    const at = Math.min(seek.at, Date.now()); // a sender's clock may run ahead
+    if (Date.now() - at >= SEEKER_FRESH_MS) return;
+    const old = this.openSeeks.find((o) => o.peer === seek.peer);
+    if (old && old.at >= at && old.tc === seek.tc) return;
+    const rating = seek.rating !== undefined ? formatRating(sanitizeOpponent(seek.rating, seek.rd)) : null;
+    const entry: OpenSeek = { peer: seek.peer, npub: seek.npub, nick: seek.nick, tc: seek.tc, rating, at };
+    this.setOpenSeeks([entry, ...this.openSeeks.filter((o) => o.peer !== seek.peer)].sort((a, b) => b.at - a.at));
+  }
+
+  /** Seeks repeat every 20 s and stop once the player is paired: drop the quiet ones. */
+  private pruneOpenSeeks() {
+    const now = Date.now();
+    const fresh = this.openSeeks.filter((o) => now - o.at < SEEKER_FRESH_MS && !isBlocked(o.peer));
+    if (fresh.length !== this.openSeeks.length) this.setOpenSeeks(fresh);
+  }
+
+  private forgetOpenSeek(peer: string) {
+    if (this.openSeeks.some((o) => o.peer === peer)) this.setOpenSeeks(this.openSeeks.filter((o) => o.peer !== peer));
+  }
+
+  private setOpenSeeks(next: readonly OpenSeek[]) {
+    this.openSeeks = next;
+    this.emit();
+  }
+
+  /** Plays a player from the open seeks list, at their time control. */
+  async join(seek: OpenSeek): Promise<void> {
+    if (isBlocked(seek.peer)) return;
+    await this.pair(seek.peer, seek.npub, seek.nick, seek.tc, false, { join: true });
+  }
+
   /**
    * Challenges the player we just played to another game at the same time
    * control. They get the challenge dialog; colours are drawn again.
@@ -949,8 +1044,15 @@ class OnlineController {
   }
 
   /** Pairs with one known player (a friend challenge or a rematch, either side). */
-  private async pair(key: string, npub: string, nick: string, tc: string, inviting: boolean, opts: { rematch?: boolean } = {}) {
-    log(inviting ? 'challenge' : 'accept', nick, tc, opts.rematch ? '(rematch)' : '', 'from state', this.state.phase);
+  private async pair(
+    key: string,
+    npub: string,
+    nick: string,
+    tc: string,
+    inviting: boolean,
+    opts: { rematch?: boolean; join?: boolean } = {},
+  ) {
+    log(opts.join ? 'join' : inviting ? 'challenge' : 'accept', nick, tc, opts.rematch ? '(rematch)' : '', 'from state', this.state.phase);
     if (this.lingering) await this.lingering;
     if (this.resuming && (await this.resuming)) return;
     if (this.state.phase === 'starting' || this.state.phase === 'seeking') this.cancelSeek();
@@ -976,9 +1078,16 @@ class OnlineController {
         network: router,
         only: key,
         invite: inviting,
-        helloTimeoutMs: INVITE_TIMEOUT_MS,
+        helloTimeoutMs: opts.join ? JOIN_TIMEOUT_MS : INVITE_TIMEOUT_MS,
         onMatch: (m) => this.onMatch(m, tc),
-        onDeclined: (reason) => this.challengeOver(reason === 'busy' ? `${nick} is busy` : `${nick} declined`),
+        onDeclined: (reason) =>
+          this.challengeOver(
+            opts.join
+              ? `${nick} was just paired with someone else`
+              : reason === 'busy'
+                ? `${nick} is busy`
+                : `${nick} declined`,
+          ),
         onLog: (m) => log('mm', m),
       });
       this.matchmakerPeer = key;
@@ -989,10 +1098,12 @@ class OnlineController {
       );
       this.matchmaker.peerConnected(key);
       this.relayPeers = new Map([[key, Date.now()]]);
-      this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0, friend: nick });
+      this.set({ phase: 'seeking', tc, since: Date.now(), lobbyPeers: 0, friend: nick, joining: opts.join });
+      if (opts.join) this.forgetOpenSeek(key); // gone from the list whatever happens next
       if (this.challengeTimer) clearTimeout(this.challengeTimer);
       this.challengeTimer = setTimeout(() => {
         if (this.state.phase !== 'seeking' || !this.state.friend) return;
+        if (opts.join) return this.challengeOver(`Couldn't start a game with ${nick}. They may have found another opponent.`);
         // Their app may be closed: leave the challenge as a message they'll be notified of.
         // (Not for a rematch: they were here a moment ago, and may not be a friend.)
         if (inviting && !opts.rematch) this.sendOfflineChallenge(key, tc);
@@ -1001,7 +1112,7 @@ class OnlineController {
             ? `${nick} didn't answer. They'll get your challenge as a message; if they accept while you're in the app, you'll be asked to play.`
             : `${nick} didn't answer`,
         );
-      }, INVITE_TIMEOUT_MS + 5_000);
+      }, opts.join ? JOIN_TIMEOUT_MS : INVITE_TIMEOUT_MS + 5_000);
     } catch (err) {
       this.set({ phase: 'error', message: `Couldn't start: ${(err as Error).message}` });
     }
@@ -1081,8 +1192,9 @@ class OnlineController {
 
   /** Another player's seek on the relays. */
   private onRelaySeek(seek: Seek) {
-    if (this.state.phase !== 'seeking' || seek.tc !== this.state.tc || !this.router) return;
     if (isBlocked(seek.peer)) return;
+    if (this.browsing) this.noteOpenSeek(seek);
+    if (this.state.phase !== 'seeking' || this.state.friend || seek.tc !== this.state.tc || !this.router) return;
     // Seeks are unsigned: never let one overwrite a route we already have.
     if (!this.router.npubOf(seek.peer)) this.router.relayKnown(seek.peer, seek.npub);
     this.worker?.send({ type: 'connect', peer: seek.peer }); // try for a direct link too
@@ -1474,6 +1586,11 @@ export function presenceOf(p: Presence | undefined, now = Date.now()): PresenceS
 /** The pending friend challenge, if any (re-renders when it changes). */
 export function useInvite(): Invite | null {
   return useSyncExternalStore(online.subscribe, () => online.invite);
+}
+
+/** Players seeking a game now (call online.browse() while showing it). */
+export function useOpenSeeks(): readonly OpenSeek[] {
+  return useSyncExternalStore(online.subscribe, () => online.openSeeks);
 }
 
 export function useOnline(): OnlineState {
