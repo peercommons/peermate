@@ -1,17 +1,9 @@
-Sound
-• Moves, captures and checks have sounds, plus a chime when a game starts and ends, and a tick when your clock runs low. Turn them off in Settings.
+Rematch
+• After an online game, tap Rematch to play the same opponent again at the same time control. They get a rematch request, and colours are drawn again. Both players need this version.
 
-Easier to find your way
-• The back arrow on Online, Friends, Games and Settings now always returns to Home.
-• A tidier Home screen: play the computer first, pass & play as a link below.
+Open seeks
+• Play online now lists the players looking for a game right now, with their time control and rating. Tap one to play them.
 
-Playing
-• Captured pieces and the material lead are shown next to each player.
-• The move list keeps the latest move in view.
-• Resigning against the computer or in pass & play asks first.
-• Home remembers the computer level and colour you last chose.
-
-Your games
-• Filter by computer, online or pass & play.
-• Each game shows Won, Lost or Draw and what kind of game it was.
-• Press and hold a game to delete it.
+Fixes
+• A friend who challenges you while you're in a game now hears that you're busy right away, instead of waiting for an answer.
+• Playing the same person twice in a row is more reliable.
