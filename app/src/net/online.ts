@@ -83,6 +83,8 @@ export type Invite = {
    * an offline challenge of ours.
    */
   kind?: 'offline' | 'answer';
+  /** From the player we just played: a rematch (accepting doesn't make them a friend). */
+  rematch?: boolean;
 };
 
 /** A friend's last presence note (SPECS §6.5). */
@@ -247,6 +249,14 @@ class OnlineController {
   private dms: { close(): void } | null = null;
   /** When the current direct link to the opponent came up (grace period for the stale check). */
   private directSince = 0;
+  /** The last opponent (kept after leaving the game), so their challenge reads as a rematch. */
+  private lastOpponent: string | null = null;
+  /**
+   * The game we last left. Its late messages (acknowledgements, resends) are
+   * dropped: they'd reach a new pairing with the same player, whose channel
+   * counts from 1 again, and an old ACK could cancel a new message.
+   */
+  private leftGid: string | null = null;
 
   constructor() {
     setInterval(() => this.checkLink(), LINK_CHECK_MS);
@@ -259,6 +269,11 @@ class OnlineController {
         this.announce('away'); // best effort: iOS may suspend us first
       }
     });
+  }
+
+  /** The finished game's opponent can be challenged again (we know their relay key). */
+  get canRematch(): boolean {
+    return !!this.match?.opponent.npub;
   }
 
   get gameId(): string | null {
@@ -363,6 +378,7 @@ class OnlineController {
     this.session?.dispose();
     this.session = null;
     if (this.match) {
+      this.leftGid = this.match.game.start.gid;
       this.match.channel.close();
       this.router?.drop(this.match.opponent.key);
     }
@@ -435,6 +451,13 @@ class OnlineController {
 
   /** Feeds a message from `peer` to the running game or the matchmaker. */
   private deliver(peer: string, wire: string) {
+    if (this.leftGid && this.match?.game.start.gid !== this.leftGid && wire.includes(`"gid":"${this.leftGid}"`)) return;
+    // A finished game's opponent challenging us again (a rematch): their new
+    // handshake has no game id, and the old game's channel would swallow it.
+    if (this.isOpponent(peer) && !this.matchmaker && this.state.phase === 'game' && this.state.end) {
+      const env = decode(wire);
+      if (env && env.gid !== this.gameId) return this.checkInvite(peer, wire);
+    }
     if (!this.isOpponent(peer) && !this.matchmaker) {
       this.checkInvite(peer, wire);
       return;
@@ -544,6 +567,7 @@ class OnlineController {
       );
       const game = saved.session.game;
       this.match = { game: { start: game.start, myColor: game.myColor, opponent: opp.key }, channel, opponent: opp };
+      this.lastOpponent = opp.key;
       this.startedAt = saved.startedAt;
       this.session = GameSession.restore({ channel, snapshot: saved.session, onEvent: (e) => this.onSessionEvent(e) });
       channel.onPersist = () => this.persist();
@@ -834,7 +858,12 @@ class OnlineController {
     this.router?.relayKnown(peer, hello.npub);
     // Free unless searching or playing (an error screen, e.g. "didn't answer", counts as free).
     const busy = this.state.phase !== 'idle' && this.state.phase !== 'error' && !(this.state.phase === 'game' && this.state.end);
-    if (busy) return this.sendDecline(peer, 'busy');
+    if (busy) {
+      // Both of us challenged at once (e.g. both tapped Rematch): ours is starting,
+      // and their resent HELLO will reach our matchmaker. Declining would end both.
+      if (this.state.phase === 'starting' && this.matchmakerPeer === peer) return;
+      return this.sendDecline(peer, 'busy');
+    }
     if (this.invite?.key === peer && this.invite.tc === hello.invite && this.invite.kind !== 'offline') return; // a resend
     log('invite from', hello.nick, hello.invite);
     clearIncoming(peer); // a live challenge replaces their offline one
@@ -848,6 +877,7 @@ class OnlineController {
       tc: hello.invite!,
       at: Date.now(),
       kind: answer ? 'answer' : undefined,
+      rematch: peer === this.lastOpponent,
     };
     if (this.inviteTimer) clearTimeout(this.inviteTimer);
     this.inviteTimer = setTimeout(() => this.clearInvite(), INVITE_TIMEOUT_MS);
@@ -894,9 +924,10 @@ class OnlineController {
     clearOutgoing(inv.key);
     // An offline challenge: they may not be online, so challenge them back (live, and as a message).
     if (inv.kind === 'offline') return this.challenge(inv.key, inv.tc);
-    // Accepting someone's challenge makes them a friend (so you can challenge back).
-    addFriend(inv.key, inv.npub, inv.nick);
-    await this.pair(inv.key, inv.npub, inv.nick, inv.tc, false);
+    // Accepting someone's challenge makes them a friend (so you can challenge back);
+    // a rematch with a stranger doesn't.
+    if (!inv.rematch || isFriend(inv.key)) addFriend(inv.key, inv.npub, inv.nick);
+    await this.pair(inv.key, inv.npub, inv.nick, inv.tc, false, { rematch: inv.rematch });
   }
 
   declineInvite(): void {
@@ -907,14 +938,29 @@ class OnlineController {
     if (inv.kind !== 'offline') this.sendDecline(inv.key, 'declined');
   }
 
-  /** Pairs with one known player (a friend challenge, either side). */
-  private async pair(key: string, npub: string, nick: string, tc: string, inviting: boolean) {
-    log(inviting ? 'challenge' : 'accept', nick, tc, 'from state', this.state.phase);
+  /**
+   * Challenges the player we just played to another game at the same time
+   * control. They get the challenge dialog; colours are drawn again.
+   */
+  async rematch(): Promise<void> {
+    const opp = this.match?.opponent;
+    if (this.state.phase !== 'game' || !this.state.end || !opp?.npub || isBlocked(opp.key)) return;
+    await this.pair(opp.key, opp.npub, opp.nick, this.state.tc, true, { rematch: true });
+  }
+
+  /** Pairs with one known player (a friend challenge or a rematch, either side). */
+  private async pair(key: string, npub: string, nick: string, tc: string, inviting: boolean, opts: { rematch?: boolean } = {}) {
+    log(inviting ? 'challenge' : 'accept', nick, tc, opts.rematch ? '(rematch)' : '', 'from state', this.state.phase);
     if (this.lingering) await this.lingering;
     if (this.resuming && (await this.resuming)) return;
     if (this.state.phase === 'starting' || this.state.phase === 'seeking') this.cancelSeek();
     if (this.state.phase === 'game' && !this.state.end) return;
     this.leave();
+    // Leaving may wait for the last game's final messages; its teardown must not
+    // close the new pairing's transports.
+    if (this.lingering) await this.lingering;
+    if (this.state.phase !== 'idle' && this.state.phase !== 'error' && !(this.state.phase === 'game' && this.state.end)) return;
+    this.matchmakerPeer = key;
     this.set({ phase: 'starting', tc, friend: nick });
     try {
       const me = await loadMe(); // relays now; the P2P worker when it's ready
@@ -948,9 +994,10 @@ class OnlineController {
       this.challengeTimer = setTimeout(() => {
         if (this.state.phase !== 'seeking' || !this.state.friend) return;
         // Their app may be closed: leave the challenge as a message they'll be notified of.
-        if (inviting) this.sendOfflineChallenge(key, tc);
+        // (Not for a rematch: they were here a moment ago, and may not be a friend.)
+        if (inviting && !opts.rematch) this.sendOfflineChallenge(key, tc);
         this.challengeOver(
-          inviting
+          inviting && !opts.rematch
             ? `${nick} didn't answer. They'll get your challenge as a message; if they accept while you're in the app, you'll be asked to play.`
             : `${nick} didn't answer`,
         );
@@ -1111,6 +1158,10 @@ class OnlineController {
     if (this.challengeTimer) clearTimeout(this.challengeTimer);
     this.challengeTimer = null;
     this.match = m;
+    this.lastOpponent = m.opponent.key;
+    // It closed itself on matching. Dropping it lets messages from anyone else
+    // (a challenge, a rematch after this game) reach checkInvite again.
+    this.matchmaker = null;
     log('matched', m.opponent.nick, 'as', m.game.myColor, 'via', this.router?.route(m.opponent.key));
     this.worker?.send({ type: 'unseek' });
     this.relay?.unseek();

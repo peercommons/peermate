@@ -176,6 +176,8 @@ export default function OnlineGameScreen() {
     ]);
 
   const blocked = blockedList.some((b) => b.key === state.opponent.key);
+  // The opponent's relay key came in their signed HELLO; without it we couldn't reach them again.
+  const canRematch = !!state.end && !blocked && online.canRematch;
   const report = async () => {
     const text = await online.reportOpponent();
     if (text) await Share.share({ title: 'Peermate report', message: text });
@@ -319,6 +321,15 @@ export default function OnlineGameScreen() {
       <View style={styles.controls}>
         {state.end ? (
           <>
+            {canRematch && (
+              <Control
+                label="Rematch"
+                onPress={() => {
+                  void online.rematch();
+                  router.replace('/online');
+                }}
+              />
+            )}
             <Control
               label="New opponent"
               onPress={() => {
@@ -460,6 +471,6 @@ const styles = StyleSheet.create({
   quick: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, borderColor: ui.border },
   quickText: { color: ui.text },
   controls: { flexDirection: 'row', gap: 8, paddingBottom: 8 },
-  control: { flex: 1, backgroundColor: ui.accent, borderRadius: 8, paddingVertical: 12, paddingHorizontal: 12, alignItems: 'center' },
-  controlText: { color: ui.accentText, fontWeight: '700' },
+  control: { flex: 1, backgroundColor: ui.accent, borderRadius: 8, paddingVertical: 12, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
+  controlText: { color: ui.accentText, fontWeight: '700', textAlign: 'center' },
 });

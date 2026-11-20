@@ -73,9 +73,13 @@ export default function RootLayout() {
       return;
     }
     Alert.alert(
-      invite.kind === 'answer' ? `${invite.nick} accepted your challenge` : `${invite.nick} challenges you`,
+      invite.kind === 'answer'
+        ? `${invite.nick} accepted your challenge`
+        : invite.rematch
+          ? `${invite.nick} wants a rematch`
+          : `${invite.nick} challenges you`,
       `${invite.tc} (minutes + seconds per move)\nID ${invite.fingerprint}` +
-        (invite.friend ? '' : `\n\n${invite.nick} isn't in your friends yet. Accepting adds them.`),
+        (invite.friend || invite.rematch ? '' : `\n\n${invite.nick} isn't in your friends yet. Accepting adds them.`),
       [
         { text: 'Decline', style: 'cancel', onPress: () => online.declineInvite() },
         {

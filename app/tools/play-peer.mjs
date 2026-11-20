@@ -10,6 +10,8 @@
 // lobby (the soak test runs each game in its own). --think sets the average think
 // time; --max-plies offers a draw (which the opponent bot accepts) after that
 // many plies. --seed HEX (32 bytes) keeps the same identity across runs. When the game ends it prints one `RESULT {json}` line and exits.
+// --rematch N stays for up to N rematches with the same opponent: it accepts theirs,
+// or with --ask-rematch asks for one itself (the app shows "wants a rematch").
 // Ctrl-C quits (aborts or resigns a running game).
 import { useWebSocketImplementation } from 'nostr-tools/pool'
 import { NodeWebSocket } from './ws.mjs'
@@ -41,7 +43,10 @@ const room = option('--room')
 const thinkMs = Number(option('--think') ?? 2000)
 const maxPlies = Number(option('--max-plies') ?? Infinity)
 const seedHex = option('--seed') // 64 hex chars: a fixed identity across runs (e.g. to test blocking)
-const valued = new Set(['--room', '--think', '--max-plies', '--seed', '--nick'].flatMap((n) => [option(n)]))
+const rematchOpt = option('--rematch')
+let rematches = Number(rematchOpt ?? 0)
+const askRematch = args.includes('--ask-rematch')
+const valued = new Set(['--room', '--think', '--max-plies', '--seed', '--nick', '--rematch'].flatMap((n) => [option(n)]))
 const tc = args.find((a) => !a.startsWith('--') && !valued.has(a)) ?? '5+0'
 const identity = deriveIdentity(seedHex ? Buffer.from(seedHex, 'hex') : newSeed())
 const nick = option('--nick') ?? (relayOnly ? 'Relay bot' : 'Desktop bot')
@@ -53,6 +58,8 @@ let match = null
 let mm = null
 let host = null
 let directSince = 0
+let leftGid = null // the game we last left: its late messages are dropped (online.ts deliver)
+const fromLeftGame = (wire) => leftGid !== null && wire.includes(`"gid":"${leftGid}"`)
 
 // A relay peer is told to the matchmaker once per HELLO_TIMEOUT_MS, like the app
 // (online.ts relayPeerSeen): peerConnected() on a known peer resyncs, and doing it
@@ -80,6 +87,7 @@ const relay = new RelayNet({
     const peer = wireSender(wire)
     if (!peer || !decode(wire)) return
     router.relayKnown(peer, npub)
+    if (fromLeftGame(wire)) return
     if (match?.opponent.key !== peer) relayPeerSeen(peer)
     mm?.peerData(peer, wire)
   }
@@ -120,7 +128,7 @@ if (!relayOnly) {
           }
           break
         case 'msg':
-          mm?.peerData(msg.from, msg.data)
+          if (!fromLeftGame(msg.data)) mm?.peerData(msg.from, msg.data)
           break
         case 'peer-left':
           router.directDown(msg.id)
@@ -143,13 +151,7 @@ if (!relayOnly) {
 log(`${nick} · ID ${fingerprint(identity.peer.publicKey)} · seeking ${tc}${relayOnly ? ' (relays only)' : ''}`)
 // Paste into the app's Friends screen to add this bot; it accepts a challenge at its time control.
 log(`friend link: peermate://p/${identity.peer.publicKey}?n=${identity.nostr.publicKey}&nick=${encodeURIComponent(nick)}`)
-mm = new Matchmaker({
-  identity,
-  nick,
-  tc,
-  network: router,
-  onLog: (m) => log(m),
-  onMatch: (m) => {
+const onMatch = (m) => {
     match = m
     host?.send({ type: 'unseek' })
     relay.unseek()
@@ -157,16 +159,18 @@ mm = new Matchmaker({
     log(`matched with ${m.opponent.nick} (${fingerprint(m.opponent.key)}); I play ${m.game.myColor === 'w' ? 'White' : 'Black'}`)
     routeNote()
     session = new GameSession({ channel: m.channel, game: m.game, onEvent })
+    const s = session // this game's (a rematch replaces the global)
+    drawOffered = false
     session.chat({ quick: 'gl' })
     maybeMove()
     // A direct link the opponent has gone quiet on (e.g. a suspended iPhone) is
     // presumed dead: use the relays and re-dial, as the app does.
     const linkWatch = setInterval(() => {
-      if (session.end) return clearInterval(linkWatch)
+      if (s.end) return clearInterval(linkWatch)
       const peer = m.opponent.key
       if (router.route(peer) !== 'direct') return
-      if (session.silenceMs() < 12_000 || Date.now() - directSince < 12_000) return
-      log(`direct link silent for ${Math.round(session.silenceMs() / 1000)} s; switching to relays`)
+      if (s.silenceMs() < 12_000 || Date.now() - directSince < 12_000) return
+      log(`direct link silent for ${Math.round(s.silenceMs() / 1000)} s; switching to relays`)
       router.directDown(peer)
       host?.send({ type: 'drop', peer })
       host?.send({ type: 'connect', peer })
@@ -175,15 +179,45 @@ mm = new Matchmaker({
     }, 2000)
     // Claim a win on time once the opponent's clock runs out (as the app does).
     const flagWatch = setInterval(() => {
-      if (session.end) return clearInterval(flagWatch)
-      const them = session.myColor === 'w' ? 'b' : 'w'
-      if (!session.myTurn && session.clocksRunning && session.clocks()[them] <= 0 && session.claimFlag()) {
+      if (s.end) return clearInterval(flagWatch)
+      const them = s.myColor === 'w' ? 'b' : 'w'
+      if (!s.myTurn && s.clocksRunning && s.clocks()[them] <= 0 && s.claimFlag()) {
         log('opponent is out of time; claiming the win')
       }
     }, 250)
-  }
-})
+}
+mm = new Matchmaker({ identity, nick, tc, network: router, onLog: (m) => log(m), onMatch })
 relay.seek(rooms, { tc, nick })
+
+/** After a game: pair with the same opponent again (theirs or our rematch challenge). */
+async function rematch() {
+  const until = Date.now() + 30_000
+  while (match.channel.unacked > 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 250))
+  const opp = match.opponent
+  leftGid = match.game.start.gid
+  session.dispose()
+  match.channel.close()
+  match = session = null
+  log(askRematch ? `asking ${opp.nick} for a rematch` : `waiting for ${opp.nick} to ask for a rematch`)
+  if (opp.npub) router.relayKnown(opp.key, opp.npub)
+  mm = new Matchmaker({
+    identity,
+    nick,
+    tc,
+    network: router,
+    only: opp.key,
+    invite: askRematch,
+    helloTimeoutMs: 10 * 60_000,
+    onLog: (m) => log(m),
+    onMatch,
+    onDeclined: (reason) => {
+      log(`rematch declined (${reason})`)
+      shutdown(0)
+    }
+  })
+  host?.send({ type: 'connect', peer: opp.key })
+  mm.peerConnected(opp.key)
+}
 
 function onEvent(e) {
   switch (e.type) {
@@ -205,6 +239,10 @@ function onEvent(e) {
           JSON.stringify({ end: e.end, ply: session.ply, fen: session.chess.fen(), color: session.myColor, routeSwitches })
       )
       session.chat({ quick: 'gg' })
+      if (rematches-- > 0) {
+        setTimeout(() => void rematch(), 500)
+        break
+      }
       // shutdown() waits for the acknowledgements, so the next seek can start soon.
       setTimeout(() => shutdown(0), 500)
       break
@@ -215,7 +253,7 @@ let drawOffered = false
 function maybeMove() {
   if (!session?.myTurn) return
   setTimeout(() => {
-    if (!session.myTurn) return
+    if (!session?.myTurn) return
     const moves = session.chess.moves({ verbose: true })
     const captures = moves.filter((m) => m.captured)
     const pool = captures.length && Math.random() < 0.7 ? captures : moves
