@@ -26,6 +26,8 @@ const FRIENDS = [
   { seed: 14, nick: 'Jonas', status: null },
 ];
 
+/** Légal's mate: a short game that ends in checkmate (the app preview video). */
+const LEGAL = 'e2e4 e7e5 g1f3 d7d6 f1c4 c8g4 b1c3 g7g6 f3e5 g4d1 c4f7 e8e7 c3d5'.split(' ');
 /** The Italian game, Møller attack: a lively middlegame. */
 const ITALIAN = 'e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d4 e5d4 c3d4 c5b4 b1c3 f6e4 e1g1 b4c3 d4d5 c3f6 f1e1 c6e7 e1e4 d7d6'.split(' ');
 /** Queen's Gambit Declined, a quiet start. */
@@ -52,6 +54,12 @@ export async function seedDemo(): Promise<void> {
     addFriend(id.peer.publicKey, id.nostr.publicKey, f.nick);
     return id.peer.publicKey;
   });
+  // Players looking for a game (the open seeks list on Play online).
+  online.demoOpenSeeks([
+    { seed: 21, nick: 'Lukas', tc: '3+2', rating: 1614, rd: 55 },
+    { seed: 22, nick: 'Amara', tc: '10+5', rating: 1738, rd: 62 },
+    { seed: 23, nick: 'Kenji', tc: '5+0', rating: 1559, rd: 90 },
+  ]);
   online.demoPresence(FRIENDS.flatMap((f, i) => (f.status ? [[keys[i], f.status] as [string, typeof f.status]] : [])));
 
   const chat: [('me' | 'them'), string, number][] = [
@@ -119,6 +127,11 @@ export function startDemoGame(): Promise<void> {
   return online.demoGame({ nick: 'Tomás', rating: 1671, rd: 64, tc: '5+0', moves: ITALIAN.slice(0, 18) });
 }
 
+/** The app preview video's game: played out move by move, ending in checkmate. */
+export function startDemoMate(plyMs: number): Promise<void> {
+  return online.demoGame({ nick: 'Tomás', rating: 1671, rd: 64, tc: '5+0', moves: LEGAL, plyMs });
+}
+
 let touring = false;
 
 /** True while the demo tour runs (screens skip permission prompts, which would spoil shots). */
@@ -135,8 +148,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * on each for the script to capture.
  */
 export async function maybeRunDemoTour(): Promise<void> {
-  if (Platform.OS !== 'ios' || !Settings.get('peermateDemoTour') || touring) return;
+  const mode = Platform.OS === 'ios' ? Settings.get('peermateDemoTour') : null;
+  if (!mode || touring) return;
   touring = true;
+  if (String(mode) === 'video') return runVideoTour();
   const shot = async (name: string, href: Href, settle: number) => {
     // Each screen straight from Home, so its back button just says "Peermate".
     if (router.canDismiss()) router.dismissAll();
@@ -159,6 +174,39 @@ export async function maybeRunDemoTour(): Promise<void> {
     void startDemoGame();
     await shot('2_online_game', '/online-game', 12000);
     appLog('demo', 'tour done');
+  } catch (err) {
+    appLog('demo', 'tour failed', String(err));
+  }
+}
+
+/**
+ * The App Store preview video (tools/preview-ios.sh records between "video
+ * start" and "video done"): Home, the open seeks, a quick online game that ends
+ * in checkmate (with Rematch), then friends and chat. About 30 s.
+ */
+async function runVideoTour(): Promise<void> {
+  const go = (href: Href) => {
+    if (router.canDismiss()) router.dismissAll();
+    if (href !== '/') router.push(href);
+  };
+  try {
+    await sleep(3000);
+    await seedDemo();
+    const maya = deriveIdentity(new Uint8Array(32).fill(FRIENDS[0].seed)).peer.publicKey;
+    await sleep(1500);
+    appLog('demo', 'video start');
+    await sleep(2500); // Home
+    go('/online');
+    await sleep(3000);
+    const game = startDemoMate(800);
+    go('/online-game');
+    await game;
+    await sleep(3500); // checkmate, Rematch
+    go('/friends');
+    await sleep(2500);
+    go({ pathname: '/chat/[key]', params: { key: maya } });
+    await sleep(3000);
+    appLog('demo', 'video done');
   } catch (err) {
     appLog('demo', 'tour failed', String(err));
   }

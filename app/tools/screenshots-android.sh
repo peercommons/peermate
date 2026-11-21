@@ -45,7 +45,7 @@ echo "Capturing:"
 shot 1_home
 open "peermate://game?resume=demo-cpu" 8   # the engine starts up first
 shot 3_vs_computer
-open "peermate://friends" 3
+open "peermate://friends" 6  # after the engine game, the first link can be missed
 shot 4_friends
 open "peermate://chat/$MAYA" 3
 shot 5_chat

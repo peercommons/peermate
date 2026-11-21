@@ -275,6 +275,8 @@ class OnlineController {
   openSeeks: readonly OpenSeek[] = [];
   private browsing: { sub: { close(): void }; timer: ReturnType<typeof setInterval> } | null = null;
   private browsers = 0;
+  /** Demo mode: the open seeks list shows these, whatever the relays say. */
+  private demoSeeks: readonly OpenSeek[] | null = null;
 
   constructor() {
     setInterval(() => this.checkLink(), LINK_CHECK_MS);
@@ -1023,7 +1025,7 @@ class OnlineController {
   }
 
   private setOpenSeeks(next: readonly OpenSeek[]) {
-    this.openSeeks = next;
+    this.openSeeks = this.demoSeeks ?? next;
     this.emit();
   }
 
@@ -1431,11 +1433,21 @@ class OnlineController {
     this.emit();
   }
 
+  /** Demo mode: players in the open seeks list. */
+  demoOpenSeeks(seeks: { seed: number; nick: string; tc: string; rating: number; rd: number }[]): void {
+    this.demoSeeks = seeks.map((s, i) => {
+      const id = deriveIdentity(new Uint8Array(32).fill(s.seed));
+      const rating = formatRating({ r: s.rating, rd: s.rd, vol: 0.06, games: 40 });
+      return { peer: id.peer.publicKey, npub: id.nostr.publicKey, nick: s.nick, tc: s.tc, rating, at: Date.now() - i * 4000 };
+    });
+    this.setOpenSeeks(this.demoSeeks);
+  }
+
   /**
    * Demo mode: a game in progress against an in-memory opponent. Both sides are
    * real sessions exchanging signed moves, so the screen shows a true game.
    */
-  async demoGame(opts: { nick: string; rating: number; rd: number; tc: string; moves: string[] }): Promise<void> {
+  async demoGame(opts: { nick: string; rating: number; rd: number; tc: string; moves: string[]; plyMs?: number }): Promise<void> {
     const me = await loadMe();
     const opp = deriveIdentity(new Uint8Array(32).fill(7));
     const gid = 'demo0000000000000000000000000001';
@@ -1488,6 +1500,8 @@ class OnlineController {
     for (const uci of opts.moves) {
       await inSync();
       if (this.session !== session) return; // left the demo game
+      if (opts.plyMs) await new Promise((r) => setTimeout(r, opts.plyMs));
+      if (this.session !== session) return;
       if (session.chess.turn() === 'w') this.move(uci);
       else them.move(uci);
     }
