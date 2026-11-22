@@ -1,8 +1,9 @@
 // Review a saved game move by move, with optional engine analysis (SPECS §2.5).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
+import { useFitBoard } from '../components/useFitBoard';
 import {
   ARASAN_CP_SCALE,
   Chess,
@@ -50,8 +51,7 @@ export default function ReviewScreen() {
 
 function ReviewView({ record }: { record: GameRecord }) {
   const { settings } = useSettings();
-  const { width } = useWindowDimensions();
-  const boardSize = Math.min(width - 16, 560);
+  const { boardSize, onPanelLayout } = useFitBoard();
 
   // All moves (with before/after FENs) from the stored PGN.
   const moves = useMemo<Move[]>(() => {
@@ -169,7 +169,7 @@ function ReviewView({ record }: { record: GameRecord }) {
         </Text>
       )}
 
-      <ScrollView style={styles.moves} contentContainerStyle={styles.moveList}>
+      <ScrollView style={styles.moves} onLayout={onPanelLayout} contentContainerStyle={styles.moveList}>
         {moves.map((m, i) => (
           <Pressable key={i} onPress={() => setPly(i + 1)} style={[styles.moveChip, ply === i + 1 && styles.moveChipActive]}>
             <Text style={[styles.moveText, ply === i + 1 && styles.moveTextActive]}>

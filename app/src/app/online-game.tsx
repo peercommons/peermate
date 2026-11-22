@@ -1,9 +1,10 @@
 // Online game screen (SPECS §2.4, §6, §8.1). Reads the running GameSession from
 // the online controller; moves go out over the P2P connection.
 import { useEffect, useRef, useState, type ComponentRef } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
+import { useFitBoard } from '../components/useFitBoard';
 import { announceMove } from '../game/speech';
 import { moveSound, playSound } from '../game/sound';
 import * as Haptics from 'expo-haptics';
@@ -48,8 +49,7 @@ export default function OnlineGameScreen() {
   const blockedList = useBlocked();
   const friendList = useFriends();
   const { settings } = useSettings();
-  const { width } = useWindowDimensions();
-  const boardSize = Math.min(width - 16, 560);
+  const { boardSize, onPanelLayout } = useFitBoard();
   const [selected, setSelected] = useState<Square | null>(null);
   const [promotion, setPromotion] = useState<{ from: Square; to: Square } | null>(null);
   const [flipped, setFlipped] = useState(false);
@@ -296,6 +296,7 @@ export default function OnlineGameScreen() {
       <ScrollView
         ref={panel}
         style={styles.panel}
+        onLayout={onPanelLayout}
         contentContainerStyle={styles.panelContent}
         onContentSizeChange={() => panel.current?.scrollToEnd({ animated: true })} // latest move and chat in view
       >

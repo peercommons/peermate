@@ -1,9 +1,2 @@
-Rematch
-• After an online game, tap Rematch to play the same opponent again at the same time control. They get a rematch request, and colours are drawn again. Both players need this version.
-
-Open seeks
-• Play online now lists the players looking for a game right now, with their time control and rating. Tap one to play them.
-
 Fixes
-• A friend who challenges you while you're in a game now hears that you're busy right away, instead of waiting for an answer.
-• Playing the same person twice in a row is more reliable.
+• On a short screen, such as Peermate's window on a Mac, the board now makes room for the moves, chat and buttons instead of squeezing them out of view. This applies to online games, games against the computer and game review.

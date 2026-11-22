@@ -1,8 +1,9 @@
 // Game screen: board, status, moves and controls for an offline game.
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { ScreenView } from '../components/ScreenView';
+import { useFitBoard } from '../components/useFitBoard';
 import { announceMove } from '../game/speech';
 import { moveSound, playSound } from '../game/sound';
 import * as Haptics from 'expo-haptics';
@@ -52,8 +53,7 @@ export default function GameScreen() {
 function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
   const game = useGame(mode, resume);
   const { settings } = useSettings();
-  const { width } = useWindowDimensions();
-  const boardSize = Math.min(width - 16, 560);
+  const { boardSize, onPanelLayout } = useFitBoard();
   const [flipped, setFlipped] = useState(false);
   const moves = useRef<ComponentRef<typeof ScrollView>>(null);
 
@@ -139,6 +139,7 @@ function GameView({ mode, resume }: { mode: GameMode; resume?: ResumeFrom }) {
       <ScrollView
         ref={moves}
         style={styles.moves}
+        onLayout={onPanelLayout}
         contentContainerStyle={styles.movesContent}
         onContentSizeChange={() => moves.current?.scrollToEnd({ animated: true })} // latest move in view
       >
