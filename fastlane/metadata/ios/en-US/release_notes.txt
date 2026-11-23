@@ -2,3 +2,6 @@ Security
 • Peermate is stricter about messages from other players: a malformed or misleading one can no longer crash the app, disturb your game or reroute it.
 • Other players' names show only letters, digits and simple punctuation, so a name can't pose as a message from Peermate.
 • A friend can no longer take another friend's name.
+
+Faster matching
+• When many people are looking for a game, you find an opponent sooner: players who have already paired with someone else drop out of your search right away.
