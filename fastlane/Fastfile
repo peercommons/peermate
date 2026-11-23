@@ -131,14 +131,26 @@ def play_json_key
 end
 
 platform :android do
-  desc 'Build a signed universal release APK for sideloading (optionally publish to a GitHub Release)'
+  desc 'Build a signed universal release APK for sideloading (optionally publish to a GitHub Release; demo:true for the screenshot build)'
   lane :sideload do |options|
     version = marketing_version
     code = version_code(options)
-    android_release('assemble', code)
+    demo = options[:demo]
+    UI.user_error!('A demo build answers peermate://demo links: never publish one') if demo && options[:publish]
+    demo_file = File.join(APP_DIR, 'src/demoBuild.ts')
+    original = File.read(demo_file)
+    begin
+      if demo
+        File.write(demo_file, original.sub('export const DEMO_LINKS = false;', 'export const DEMO_LINKS = true;'))
+        UI.user_error!('demoBuild.ts has no DEMO_LINKS = false line') if File.read(demo_file) == original
+      end
+      android_release('assemble', code)
+    ensure
+      File.write(demo_file, original)
+    end
 
     FileUtils.mkdir_p(DIST_DIR)
-    apk = File.join(DIST_DIR, "peermate-#{version}-#{code}.apk")
+    apk = File.join(DIST_DIR, "peermate-#{version}-#{code}#{demo ? '-demo' : ''}.apk")
     FileUtils.cp(lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH], apk)
     UI.success("APK ready: #{apk}")
     prune_dist

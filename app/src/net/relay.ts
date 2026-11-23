@@ -16,7 +16,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import * as nip44 from 'nostr-tools/nip44';
 import * as nip17 from 'nostr-tools/nip17';
 import * as nip59 from 'nostr-tools/nip59';
-import { RelayHealth } from '@peermate/core';
+import { displayNick, RelayHealth } from '@peermate/core';
 
 /** Provisional app-specific ephemeral kind (SPECS §16 Q2). */
 export const PEERMATE_KIND = 25050;
@@ -90,6 +90,8 @@ const PROBE_MS = 20_000;
 /** Seeks older than this are ignored (strfry relays replay ephemeral events for minutes). */
 const SEEK_MAX_AGE_S = 45;
 const MAX_SEEN = 2000;
+/** Conversation keys kept (one per Nostr key we hear from; anyone can make new ones). */
+const MAX_KEYS = 256;
 
 /** `at`: when the seek was sent (ms, the sender's clock). */
 export type Seek = { room: string; peer: string; npub: string; tc: string; nick: string; at: number; rating?: number; rd?: number };
@@ -410,6 +412,7 @@ export class RelayNet {
     if (!k) {
       k = nip44.getConversationKey(this.sk, npub);
       this.keys.set(npub, k);
+      if (this.keys.size > MAX_KEYS) this.keys.delete(this.keys.keys().next().value!);
     }
     return k;
   }
@@ -484,6 +487,7 @@ export class RelayNet {
         }
         if (rumor.kind !== 14 || rumor.pubkey === this.npub || seen.has(rumor.id) || typeof rumor.content !== 'string') return;
         seen.add(rumor.id);
+        if (seen.size > MAX_SEEN) seen.delete(seen.values().next().value!);
         onDM({ id: rumor.id, from: rumor.pubkey, text: rumor.content, at: rumor.created_at * 1000 });
       },
       false, // stored events, none of them ours: no echo to watch for
@@ -549,7 +553,7 @@ export class RelayNet {
           peer: c.pk,
           npub: e.pubkey,
           tc: c.tc,
-          nick: c.nick.slice(0, 32),
+          nick: displayNick(c.nick, 'Player'),
           at: e.created_at * 1000,
           ...(rated ? { rating: c.r as number, rd: c.rd as number } : {}),
         });

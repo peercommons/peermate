@@ -2,13 +2,17 @@
 # Store screenshots on an Android EMULATOR (SPECS §13.3): fresh install, demo
 # mode (src/demo.ts), then each screen by deep link.
 #
-#   tools/screenshots-android.sh [path/to.apk]     (default: newest dist/*.apk)
+#   tools/screenshots-android.sh [path/to.apk]     (default: newest dist/*-demo.apk)
+#
+# Needs a demo build, the only kind that answers peermate://demo links:
+#   bundle exec fastlane android sideload demo:true
 #
 # Writes fastlane/metadata/android/en-US/images/phoneScreenshots/*.png (the
 # layout `supply` uploads). Refuses to run on a real phone: it uninstalls the app.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-APK="${1:-$(ls -t "$ROOT"/dist/*.apk | head -1)}"
+APK="${1:-$(ls -t "$ROOT"/dist/*-demo.apk 2>/dev/null | head -1)}"
+[[ -n "$APK" ]] || { echo "No demo APK in dist/ (bundle exec fastlane android sideload demo:true)." >&2; exit 1; }
 SERIAL="$(adb devices | awk '/^emulator-[0-9]+\tdevice$/ {print $1; exit}')"
 [[ -n "$SERIAL" ]] || { echo "No emulator running (this never runs on a real phone)." >&2; exit 1; }
 ADB=(adb -s "$SERIAL")

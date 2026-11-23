@@ -8,6 +8,7 @@
 //   3. One pairing at a time: while busy we DECLINE "busy" and the challenger
 //      retries shortly. The first pairing that completes wins.
 import { ReliableChannel, realTimers, type Timers } from './channel.ts';
+import { displayNick } from './nick.ts';
 import { PROTOCOL_VERSION, type Message } from './envelope.ts';
 import type { Identity } from './identity.ts';
 import { awaitChallenge, challenge, type GameStart } from './pairing.ts';
@@ -59,6 +60,9 @@ export const HELLO_TIMEOUT_MS = 30_000;
 type Hello = Extract<Message, { t: 'HELLO' }>;
 type PeerState = { channel: ReliableChannel; hello: Hello | null; pairing: boolean; attempt: number };
 
+/** Lobby peers handled at once (each holds a channel until it pairs or leaves). */
+export const MAX_LOBBY_PEERS = 64;
+
 export class Matchmaker {
   matched: Match | null = null;
   private readonly peers = new Map<string, PeerState>();
@@ -89,6 +93,11 @@ export class Matchmaker {
     const known = this.peers.get(peer);
     if (known) {
       known.channel.resync();
+      return;
+    }
+    // A channel per lobby peer; peers are cheap to make, so cap them.
+    if (this.peers.size >= MAX_LOBBY_PEERS) {
+      this.log(`${peer.slice(0, 8)}: lobby full, ignoring`);
       return;
     }
     const channel = new ReliableChannel({
@@ -245,7 +254,7 @@ export class Matchmaker {
     this.matched = {
       game,
       channel: state.channel,
-      opponent: { key: peer, nick: state.hello?.nick ?? 'Opponent', npub: state.hello?.npub, rating: state.hello?.rating, rd: state.hello?.rd },
+      opponent: { key: peer, nick: displayNick(state.hello?.nick, 'Opponent'), npub: state.hello?.npub, rating: state.hello?.rating, rd: state.hello?.rd },
     };
     this.close();
     this.opts.onMatch(this.matched);

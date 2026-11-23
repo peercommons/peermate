@@ -27,6 +27,7 @@ import {
   Matchmaker,
   newSeed,
   PeerRouter,
+  relayBindingOk,
   timeControlClass,
   wireSender
 } from '../../core/src/index.ts'
@@ -85,8 +86,9 @@ const relay = new RelayNet({
   },
   onMessage: (npub, wire) => {
     const peer = wireSender(wire)
-    if (!peer || !decode(wire)) return
-    router.relayKnown(peer, npub)
+    const env = peer && decode(wire)
+    if (!env) return
+    if (relayBindingOk(router.npubOf(peer), npub, env, match?.opponent.key === peer)) router.relayKnown(peer, npub)
     if (fromLeftGame(wire)) return
     if (match?.opponent.key !== peer) relayPeerSeen(peer)
     mm?.peerData(peer, wire)

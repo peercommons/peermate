@@ -49,20 +49,26 @@ function lineReader(onMessage, maxLine = MAX_FRAME * 2) {
   let pending = ''
   return (data) => {
     pending += b4a.toString(data)
-    if (pending.length > maxLine && pending.indexOf('\n') === -1) pending = '' // oversized junk
     let nl
     while ((nl = pending.indexOf('\n')) !== -1) {
       const line = pending.slice(0, nl)
       pending = pending.slice(nl + 1)
-      if (!line) continue
+      if (!line || line.length > maxLine) continue // oversized junk
       let msg
       try {
         msg = JSON.parse(line)
       } catch {
         continue // ignore malformed input from a peer or host
       }
-      onMessage(msg)
+      // Peers send objects; "null" or a bare number would break the handlers.
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) continue
+      try {
+        onMessage(msg)
+      } catch (err) {
+        console.error('message handler failed:', err?.message ?? err) // one bad message must not stop the worker
+      }
     }
+    if (pending.length > maxLine) pending = '' // an oversized line still arriving
   }
 }
 
@@ -267,3 +273,4 @@ module.exports = async function start(ipc, ready, opts = {}) {
 
 module.exports.topicFor = topicFor
 module.exports.roomTopic = roomTopic
+module.exports.lineReader = lineReader

@@ -14,9 +14,11 @@ import { appLog } from '../../modules/peermate-log';
 import Storage from 'expo-sqlite/kv-store';
 import {
   decode,
+  displayNick,
   parseTimeControl,
   fingerprint,
   PeerRouter,
+  relayBindingOk,
   wireSender,
   GameSession,
   lobbyRoom,
@@ -108,6 +110,8 @@ const PRESENCE_ANSWER_AFTER_MS = 30_000;
  * players who may have been paired since: those don't count.
  */
 const SEEKER_FRESH_MS = 30_000;
+/** Open seeks listed at most (a page of strangers; more would only be spam). */
+const MAX_OPEN_SEEKS = 30;
 
 /** A player seeking a game, as shown in the open seeks list. */
 export type OpenSeek = { peer: string; npub: string; nick: string; tc: string; rating: string | null; at: number };
@@ -893,7 +897,7 @@ class OnlineController {
     this.invite = {
       key: peer,
       npub: hello.npub,
-      nick: getFriend(peer)?.nick ?? hello.nick.slice(0, 32),
+      nick: getFriend(peer)?.nick ?? displayNick(hello.nick, 'Player'),
       fingerprint: fingerprint(peer),
       friend: isFriend(peer),
       tc: hello.invite!,
@@ -1010,7 +1014,10 @@ class OnlineController {
     if (old && old.at >= at && old.tc === seek.tc) return;
     const rating = seek.rating !== undefined ? formatRating(sanitizeOpponent(seek.rating, seek.rd)) : null;
     const entry: OpenSeek = { peer: seek.peer, npub: seek.npub, nick: seek.nick, tc: seek.tc, rating, at };
-    this.setOpenSeeks([entry, ...this.openSeeks.filter((o) => o.peer !== seek.peer)].sort((a, b) => b.at - a.at));
+    // Newest first, and only so many (anyone can publish seeks under new keys).
+    this.setOpenSeeks(
+      [entry, ...this.openSeeks.filter((o) => o.peer !== seek.peer)].sort((a, b) => b.at - a.at).slice(0, MAX_OPEN_SEEKS),
+    );
   }
 
   /** Seeks repeat every 20 s and stop once the player is paired: drop the quiet ones. */
@@ -1227,8 +1234,9 @@ class OnlineController {
     if (!peer || !this.router) return;
     this.traceHandshake('relay <-', wire);
     // Bind peer key -> Nostr key only from a validly signed message.
-    if (!decode(wire)) return;
-    this.router.relayKnown(peer, npub);
+    const env = decode(wire);
+    if (!env) return;
+    if (relayBindingOk(this.router.npubOf(peer), npub, env, this.isOpponent(peer))) this.router.relayKnown(peer, npub);
     if (!this.isOpponent(peer)) {
       if (this.state.phase !== 'seeking') return this.checkInvite(peer, wire);
       this.relayPeerSeen(peer);
@@ -1408,7 +1416,7 @@ class OnlineController {
   private onTheirResult(wire: string) {
     const env = decode(wire);
     const gid = this.match?.game.start.gid;
-    if (!env || env.body.t !== 'RESULT' || !gid || env.gid !== gid) return;
+    if (!env || env.body.t !== 'RESULT' || !gid || env.gid !== gid || env.from !== this.match?.opponent.key) return;
     this.resultWires = { ...(this.resultWires?.gid === gid ? this.resultWires : { gid }), theirs: wire };
     this.completeResult();
   }

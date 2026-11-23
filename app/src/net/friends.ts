@@ -5,7 +5,7 @@
 // Share link: peermate://p/<peerKey>?n=<nostrKey>&nick=<name>
 import { useSyncExternalStore } from 'react';
 import Storage from 'expo-sqlite/kv-store';
-import { fingerprint } from '@peermate/core';
+import { displayNick, fingerprint } from '@peermate/core';
 import { unblock } from './blocklist';
 import { forgetChallenges } from './challenges';
 import { deleteThread } from './messages';
@@ -53,7 +53,7 @@ export function isFriend(key: string): boolean {
 export function addFriend(key: string, npub: string, nick: string): void {
   if (!HEX64.test(key) || !HEX64.test(npub)) return;
   unblock(key);
-  const name = nick.trim().slice(0, 32) || 'Friend';
+  const name = displayNick(nick, 'Friend');
   const existing = getFriend(key);
   if (existing) {
     save(list.map((f) => (f.key === key ? { ...f, npub, nick: name } : f)));
@@ -62,10 +62,18 @@ export function addFriend(key: string, npub: string, nick: string): void {
   }
 }
 
-/** Keeps a friend's Nostr key and name current (from their signed HELLO). */
+/**
+ * Keeps a friend's Nostr key and name current (from their signed HELLO). A new
+ * name that another friend already has is not taken (their messages and
+ * notifications would show under that friend's name).
+ */
 export function refreshFriend(key: string, npub: string, nick: string): void {
   const f = getFriend(key);
-  if (f && (f.npub !== npub || f.nick !== nick.slice(0, 32))) addFriend(key, npub, nick);
+  if (!f) return;
+  let name = displayNick(nick, f.nick);
+  const taken = (n: string) => list.some((o) => o.key !== key && o.nick.toLowerCase() === n.toLowerCase());
+  if (taken(name)) name = f.nick;
+  if (f.npub !== npub || f.nick !== name) addFriend(key, npub, name);
 }
 
 export function removeFriend(key: string): void {
@@ -101,5 +109,5 @@ export function parseFriendParams(key: unknown, npub: unknown, nick: unknown): {
   const k = key.toLowerCase();
   const n = npub.toLowerCase();
   if (!HEX64.test(k) || !HEX64.test(n)) return null;
-  return { key: k, npub: n, nick: typeof nick === 'string' && nick.trim() ? nick.trim().slice(0, 32) : 'Friend' };
+  return { key: k, npub: n, nick: displayNick(nick, 'Friend') };
 }

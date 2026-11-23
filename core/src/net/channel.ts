@@ -27,6 +27,13 @@ export const realTimers: Timers = {
 export const RETRANSMIT_BASE_MS = 600;
 export const RETRANSMIT_MAX_MS = 8000;
 const MAX_EARLY_BUFFER = 256;
+/**
+ * A SYNC replays our whole history, so a peer sending them nonstop would make us
+ * resend everything again and again (over relays, each one a Nostr publish). One
+ * replay per window serves a genuine resync; a SYNC asking for less than that
+ * one did is skipped until the window ends.
+ */
+export const SYNC_WINDOW_MS = 3000;
 
 export type ChannelOptions = {
   key: KeyPair;
@@ -80,6 +87,8 @@ export class ReliableChannel {
   onPersist: (() => void) | null = null;
   /** Every reliable message we sent, for replay to a peer that lost state. */
   private readonly sent = new Map<number, string>();
+  /** The last SYNC we answered: when, and from which point it asked. */
+  private lastSync: { at: number; delivered: number } | null = null;
 
   constructor(opts: ChannelOptions) {
     this.key = opts.key;
@@ -138,6 +147,10 @@ export class ReliableChannel {
     if (env.from === this.key.publicKey) return; // our own echo (e.g. a relay)
     if (this.peer === undefined) this.peer = env.from;
     if (env.from !== this.peer) return;
+    // Another game's message (same two players, a replayed or late copy): it would
+    // take a sequence number that belongs to this game's own message. Handshake
+    // messages carry no gid (the pairing sets it), so those still pass.
+    if (env.gid !== undefined && this.gid !== undefined && env.gid !== this.gid) return;
     this.lastHeardAt = this.timers.now();
 
     const body = env.body;
@@ -151,7 +164,11 @@ export class ReliableChannel {
         }
         return;
       }
-      case 'SYNC':
+      case 'SYNC': {
+        const now = this.timers.now();
+        const last = this.lastSync;
+        if (last && now - last.at < SYNC_WINDOW_MS && body.delivered >= last.delivered) return;
+        this.lastSync = { at: now, delivered: body.delivered };
         // The peer may have restarted from an older save: replay everything after
         // what it says it has, even messages it acknowledged before.
         for (const [seq, wire] of this.sent) {
@@ -159,6 +176,7 @@ export class ReliableChannel {
         }
         this.resendAll();
         return;
+      }
       case 'PING':
         this.send({ t: 'PONG', nonce: body.nonce });
         return;

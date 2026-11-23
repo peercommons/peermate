@@ -1,2 +1,4 @@
-Fixes
-• On a short screen, such as Peermate's window on a Mac, the board now makes room for the moves, chat and buttons instead of squeezing them out of view. This applies to online games, games against the computer and game review.
+Security
+• Peermate is stricter about messages from other players: a malformed or misleading one can no longer crash the app, disturb your game or reroute it.
+• Other players' names show only letters, digits and simple punctuation, so a name can't pose as a message from Peermate.
+• A friend can no longer take another friend's name.

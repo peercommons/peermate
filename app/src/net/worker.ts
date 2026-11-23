@@ -58,7 +58,14 @@ async function start(): Promise<P2PWorker> {
       } catch {
         continue;
       }
-      for (const l of [...listeners]) l(event);
+      if (!event || typeof event !== 'object') continue;
+      for (const l of [...listeners]) {
+        try {
+          l(event);
+        } catch (err) {
+          console.error('worker event handler failed:', (err as Error)?.message ?? err); // keep the rest of the stream
+        }
+      }
     }
   });
 

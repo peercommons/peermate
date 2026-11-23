@@ -51,6 +51,8 @@ jobs:
       - run: npm ci --prefix ../core # @peermate/core is linked from ../core
       - run: npm ci
       - run: npm run typecheck
+      - name: Demo links are off
+        run: grep -qx 'export const DEMO_LINKS = false;' src/demoBuild.ts
       # Two P2P workers on a local HyperDHT testnet (no internet DHT needed).
       - run: npm run test:p2p
 

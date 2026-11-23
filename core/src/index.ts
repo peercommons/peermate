@@ -14,3 +14,4 @@ export * from './net/report.ts';
 export * from './rating.ts';
 export * from './net/relayHealth.ts';
 export * from './net/result.ts';
+export * from './net/nick.ts';

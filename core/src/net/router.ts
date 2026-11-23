@@ -2,6 +2,7 @@
 // when a connection is up; otherwise the relay path (Nostr) if we know the
 // peer's Nostr key. The reliable channel above makes switching seamless: after
 // any switch the app calls channel.resync() and both sides replay what's missing.
+import type { Envelope } from './envelope.ts';
 import type { PeerNetwork } from './matchmaker.ts';
 
 export type Route = 'direct' | 'relay';
@@ -66,8 +67,34 @@ export class PeerRouter implements PeerNetwork {
 /**
  * The sender's Ed25519 key from a wire message, without verifying it (the
  * channel verifies). Lets a transport attribute an unsolicited message.
+ *
+ * The envelope's own top-level `from` (the key its signature is checked
+ * against), never a "from" found elsewhere in the text: a sender could put
+ * someone else's key inside the body.
  */
 export function wireSender(wire: string): string | null {
-  const m = /"from":"([0-9a-f]{64})"/.exec(wire);
-  return m ? m[1] : null;
+  try {
+    const e = JSON.parse(wire) as unknown;
+    if (!e || typeof e !== 'object') return null;
+    const from = (e as { from?: unknown }).from;
+    return typeof from === 'string' && /^[0-9a-f]{64}$/.test(from) ? from : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a verified message `env` that came through the relays from Nostr key
+ * `npub` may set the relay route of its sender (`env.from`), whose route is
+ * `known` now. A signed message proves who wrote it, not who forwarded it: anyone
+ * can relay a copy of a message they received. So a route is only set where none
+ * exists, and only moved on the sender's own signed HELLO naming this Nostr key,
+ * never while we're playing them.
+ */
+export function relayBindingOk(known: string | undefined, npub: string, env: Envelope, opponent: boolean): boolean {
+  if (known === npub) return true;
+  const body = env.body;
+  if (body.t === 'HELLO' && body.npub !== npub) return false;
+  if (known === undefined) return true;
+  return body.t === 'HELLO' && !opponent;
 }

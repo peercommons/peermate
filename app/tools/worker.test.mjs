@@ -75,3 +75,18 @@ test('different rooms map to different topics', () => {
   assert.notDeepEqual(topicFor('blitz'), topicFor('rapid'))
   assert.deepEqual(topicFor('blitz'), topicFor('blitz'))
 })
+
+test('a peer sending junk lines cannot break the reader', () => {
+  const { lineReader } = require('../p2p/worker.js')
+  const got = []
+  const read = lineReader((msg) => {
+    if (msg.k === 'boom') throw new Error('handler bug')
+    got.push(msg.k)
+  }, 100)
+  const b4a = require('b4a')
+  read(b4a.from('null\n5\n"str"\n[1]\n{"k":"boom"}\n{"k":"a"}\n'))
+  read(b4a.from('{"k":"' + 'x'.repeat(200) + '"}\n{"k":"b"}\n'))
+  read(b4a.from('{"k":"' + 'y'.repeat(200))) // an oversized line still arriving: dropped
+  read(b4a.from('"}\n{"k":"c"}\n'))
+  assert.deepEqual(got, ['a', 'b', 'c'])
+})

@@ -179,8 +179,11 @@ export function decode(wire: string): Envelope | null {
   if (e.gid !== undefined && !isStr(e.gid, 64)) return null;
   const body = e.body as Record<string, unknown> | undefined;
   if (!body || typeof body !== 'object' || typeof body.t !== 'string') return null;
+  // Own keys only: a type named after an Object.prototype method ("valueOf",
+  // "__proto__") must not look up, and call, that method.
+  if (!Object.prototype.hasOwnProperty.call(BODY_CHECKS, body.t)) return null;
   const check = BODY_CHECKS[body.t as MessageType];
-  if (!check || !check(body)) return null;
+  if (!check(body)) return null;
   const reliable = !UNRELIABLE.has(body.t as MessageType);
   if (reliable !== (e.seq > 0)) return null;
   const env = e as unknown as Envelope;
