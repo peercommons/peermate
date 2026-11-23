@@ -93,6 +93,8 @@ export function awaitChallenge(
 
   channel.onMessage((msg) => {
     if (finished) return;
+    // The other side stopped seeking or paired elsewhere: nothing more is coming.
+    if (msg.t === 'DECLINE' && msg.reason === 'taken') return finish({ ok: false, reason: 'taken' });
     if (msg.t === 'CHALLENGE' && commit === null) {
       const reason = (() => {
         try {

@@ -56,9 +56,24 @@ export type MatchmakerOptions = {
 export const PAIRING_TIMEOUT_MS = 15_000;
 /** A lobby peer that hasn't said HELLO by now is dropped (e.g. a stale relay seek). */
 export const HELLO_TIMEOUT_MS = 30_000;
+/** A full lobby drops a peer that has been idle (HELLO, then nothing) this long. */
+export const IDLE_EVICT_MS = 20_000;
+/** A peer that let a pairing time out isn't considered again for this long. */
+export const STALL_PENALTY_MS = 5 * 60_000;
+/** DECLINE reason: paired with someone else (or stopped seeking). */
+const TAKEN = 'taken';
 
 type Hello = Extract<Message, { t: 'HELLO' }>;
-type PeerState = { channel: ReliableChannel; hello: Hello | null; pairing: boolean; attempt: number };
+type PeerState = {
+  channel: ReliableChannel;
+  hello: Hello | null;
+  pairing: boolean;
+  attempt: number;
+  /** They want another time control: we'll never pair, so no goodbye either. */
+  otherTc?: boolean;
+  /** When their HELLO came (timers.now()). */
+  helloAt?: number;
+};
 
 /** Lobby peers handled at once (each holds a channel until it pairs or leaves). */
 export const MAX_LOBBY_PEERS = 64;
@@ -66,6 +81,13 @@ export const MAX_LOBBY_PEERS = 64;
 export class Matchmaker {
   matched: Match | null = null;
   private readonly peers = new Map<string, PeerState>();
+  /**
+   * Peers that don't get a lobby slot again until the given time: those wanting
+   * another time control (for this search), and those that stalled a pairing
+   * (for STALL_PENALTY_MS; a peer that never finishes a handshake costs every
+   * challenger PAIRING_TIMEOUT_MS each time it comes back).
+   */
+  private readonly ignored = new Map<string, number>();
   private busy = false;
   private closed = false;
   private readonly timers: Timers;
@@ -95,10 +117,23 @@ export class Matchmaker {
       known.channel.resync();
       return;
     }
-    // A channel per lobby peer; peers are cheap to make, so cap them.
+    const until = this.ignored.get(peer);
+    if (until !== undefined && this.timers.now() < until) return;
+    // A channel per lobby peer; peers are cheap to make, so cap them. When full,
+    // make room by dropping the longest-idle one: it said HELLO a while ago and
+    // nothing came of it (a player who never challenges would hold its slot forever).
     if (this.peers.size >= MAX_LOBBY_PEERS) {
-      this.log(`${peer.slice(0, 8)}: lobby full, ignoring`);
-      return;
+      const now = this.timers.now();
+      const idle = [...this.peers].find(
+        ([key, s]) => !s.pairing && s.helloAt !== undefined && now - s.helloAt > IDLE_EVICT_MS && this.matched?.opponent.key !== key,
+      );
+      if (!idle) {
+        this.log(`${peer.slice(0, 8)}: lobby full, ignoring`);
+        return;
+      }
+      this.log(`${idle[1].hello?.nick ?? idle[0].slice(0, 8)}: idle, making room`);
+      this.ignore(idle[0], IDLE_EVICT_MS * 3);
+      this.peerLeft(idle[0]);
     }
     const channel = new ReliableChannel({
       key: this.opts.identity.peer,
@@ -150,8 +185,10 @@ export class Matchmaker {
     this.closed = true;
     for (const [peer, state] of this.peers) {
       if (this.matched?.opponent.key === peer) continue;
-      // Free anyone mid-handshake with us right away instead of at their timeout.
-      if (state.pairing) state.channel.send({ t: 'DECLINE', reason: 'taken' });
+      // Tell everyone who might still challenge us that we're gone: anyone mid-
+      // handshake, and anyone who said HELLO (else their challenge would wait out
+      // PAIRING_TIMEOUT_MS on a player who left).
+      if (state.pairing || (state.hello && !state.otherTc)) state.channel.send({ t: 'DECLINE', reason: TAKEN });
       state.channel.close();
       this.opts.network.drop(peer);
     }
@@ -173,14 +210,35 @@ export class Matchmaker {
       this.opts.onDeclined?.(msg.reason);
       return;
     }
+    // A lobby peer that just paired with someone else.
+    if (msg.t === 'DECLINE' && msg.reason === TAKEN && state.hello) {
+      this.log(`${state.hello.nick}: paired elsewhere`);
+      this.peerLeft(peer);
+      return;
+    }
     if (msg.t !== 'HELLO' || state.hello) return;
     if (!msg.proto.includes(PROTOCOL_VERSION)) {
       this.log(`${msg.nick}: incompatible protocol ${msg.proto.join(',')}`);
       return;
     }
     state.hello = msg;
+    state.helloAt = this.timers.now();
     if (this.me < peer) this.tryChallenge(peer, state);
     else this.waitForChallenge(peer, state);
+  }
+
+  /** They want another time control: free their lobby slot for good. */
+  private notOurTc(peer: string, state: PeerState) {
+    state.otherTc = true;
+    if (this.peers.get(peer) !== state) return;
+    this.ignore(peer, Infinity);
+    this.peerLeft(peer);
+  }
+
+  private ignore(peer: string, ms: number) {
+    this.ignored.delete(peer); // re-insert: the oldest entry goes first when full
+    this.ignored.set(peer, this.timers.now() + ms);
+    if (this.ignored.size > 1024) this.ignored.delete(this.ignored.keys().next().value!);
   }
 
   /** Still the live connection to `peer`? (Retries can outlive a reconnect.) */
@@ -203,6 +261,8 @@ export class Matchmaker {
       if (r.ok) return this.complete(peer, state, r.game);
       this.log(`${state.hello?.nick ?? peer.slice(0, 8)} declined: ${r.reason}`);
       // Busy peers get another try; other refusals (different time control) are final.
+      if (r.reason === TAKEN) return this.peerLeft(peer);
+      if (r.reason === 'different time control') return this.notOurTc(peer, state);
       if (r.reason === 'busy') {
         state.channel.onMessage((msg) => this.onLobbyMessage(peer, state, msg));
         this.timers.setTimeout(() => this.tryChallenge(peer, state), BUSY_RETRY_MS);
@@ -217,7 +277,10 @@ export class Matchmaker {
         me: this.me,
         decide: (c) => {
           if (this.closed || this.matched) return 'taken';
-          if (c.tc !== this.opts.tc) return 'different time control';
+          if (c.tc !== this.opts.tc) {
+            this.timers.setTimeout(() => this.notOurTc(peer, state), 5000); // once our DECLINE has arrived
+            return 'different time control';
+          }
           if (this.busy) return 'busy';
           this.busy = true;
           state.pairing = true;
@@ -231,6 +294,7 @@ export class Matchmaker {
           this.busy = false;
         }
         if (r.ok) return this.complete(peer, state, r.game);
+        if (r.reason === TAKEN) return this.peerLeft(peer);
         // Stay ready for the next challenge from this peer (e.g. after "busy").
         if (this.current(peer, state)) this.waitForChallenge(peer, state);
       },
@@ -244,6 +308,7 @@ export class Matchmaker {
       // Only if this exact attempt, on this exact connection, is still pending.
       if (!state.pairing || state.attempt !== attempt || this.peers.get(peer) !== state || this.matched) return;
       this.log(`${state.hello?.nick ?? peer.slice(0, 8)}: pairing timed out`);
+      this.ignore(peer, STALL_PENALTY_MS);
       this.peerLeft(peer);
       this.opts.network.drop(peer);
     }, PAIRING_TIMEOUT_MS);

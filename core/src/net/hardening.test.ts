@@ -8,7 +8,7 @@ import { deriveIdentity } from './identity.ts';
 import { relayBindingOk, wireSender } from './router.ts';
 import { VirtualTime } from './testing.ts';
 import { displayNick, NICK_MAX } from './nick.ts';
-import { Matchmaker, MAX_LOBBY_PEERS } from './matchmaker.ts';
+import { IDLE_EVICT_MS, Matchmaker, MAX_LOBBY_PEERS } from './matchmaker.ts';
 
 const seed = (n: number) => new Uint8Array(32).fill(n);
 const alice = deriveIdentity(seed(1));
@@ -121,4 +121,31 @@ test('matchmaker: lobby peers are capped', () => {
   });
   for (let i = 0; i < MAX_LOBBY_PEERS + 20; i++) mm.peerConnected(i.toString(16).padStart(64, '0'));
   assert.equal(greeted.size, MAX_LOBBY_PEERS);
+});
+
+test('matchmaker: a full lobby makes room by dropping a peer idle since its HELLO', () => {
+  const time = new VirtualTime();
+  const greeted = new Set<string>();
+  const mm = new Matchmaker({
+    identity: alice,
+    nick: 'Alice',
+    tc: '5+0',
+    timers: time,
+    network: { send: (peer) => greeted.add(peer), drop: () => undefined },
+    onMatch: () => undefined,
+  });
+  // MAX_LOBBY_PEERS squatters: they say HELLO and then nothing (higher keys, so we wait for them).
+  const squatters = Array.from({ length: MAX_LOBBY_PEERS }, (_, i) => deriveIdentity(seed(100 + (i % 150))));
+  const unique = [...new Map(squatters.map((s) => [s.peer.publicKey, s])).values()].filter((s) => s.peer.publicKey > alice.peer.publicKey);
+  for (const s of unique) {
+    mm.peerConnected(s.peer.publicKey);
+    mm.peerData(s.peer.publicKey, sealed(s.peer, { t: 'HELLO', app: 'peermate/0.1', proto: [1], nick: 'S', npub: s.nostr.publicKey }, { seq: 1 }));
+  }
+  for (let i = unique.length; i < MAX_LOBBY_PEERS; i++) mm.peerConnected(i.toString(16).padStart(64, '0')); // fill the rest
+  const late = 'f'.repeat(64);
+  mm.peerConnected(late);
+  assert.equal(greeted.has(late), false, 'full: nobody idle long enough yet');
+  time.advance(IDLE_EVICT_MS + 1000);
+  mm.peerConnected(late);
+  assert.equal(greeted.has(late), true, 'an idle squatter made room');
 });
