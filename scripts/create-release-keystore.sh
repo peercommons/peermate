@@ -8,8 +8,10 @@
 set -euo pipefail
 
 DIR="${PEERMATE_KEYSTORE_DIR:-$HOME/.peermate}"
-FILE="$DIR/peermate-release.jks"
+FILE="$DIR/${PEERMATE_KEYSTORE_NAME:-peermate-release.jks}"
 ALIAS="peermate"
+# The certificate's name is readable in every APK: the publisher, nothing personal.
+DNAME="${PEERMATE_KEY_DNAME:-CN=Peermate, O=Peercommons}"
 
 if [[ -e "$FILE" ]]; then
   echo "Refusing to overwrite existing keystore: $FILE" >&2
@@ -24,10 +26,11 @@ fi
 mkdir -p "$DIR"
 chmod 700 "$DIR"
 
-echo "keytool will ask for a keystore password (6+ characters) and your name/organisation."
+echo "keytool will ask for a keystore password (6+ characters). Certificate name: $DNAME"
 keytool -genkeypair -v \
   -keystore "$FILE" \
   -alias "$ALIAS" \
+  -dname "$DNAME" \
   -keyalg RSA -keysize 4096 \
   -validity 10000 || true
 
