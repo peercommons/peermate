@@ -65,6 +65,7 @@
         }
       ],
       "./plugins/without-remote-push.js",
+      "./plugins/optional-portrait.js",
       "expo-notifications",
       "expo-background-task",
       [
