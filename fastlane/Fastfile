@@ -245,9 +245,15 @@ platform :android do
   lane :metadata do
     dir = File.join(META_DIR, 'android')
     ensure_no_placeholders!(dir)
+    # supply looks up a release even with changelogs skipped (an empty version
+    # code slips past its filter), so name the newest internal-track build.
+    code = google_play_track_version_codes(json_key: play_json_key, package_name: BUNDLE_ID, track: 'internal').max
+    UI.user_error!('No build on the internal track yet: upload one first') unless code
     upload_to_play_store(
       json_key: play_json_key,
       package_name: BUNDLE_ID,
+      track: 'internal',
+      version_code: code,
       metadata_path: dir,
       skip_upload_aab: true,
       skip_upload_apk: true,
